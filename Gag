@@ -1,131 +1,180 @@
--- ========================== SERVICES ==========================
 local Players          = game:GetService("Players")
 local ReplicatedStorage= game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
-local RunService       = game:GetService("RunService")
 local TweenService     = game:GetService("TweenService")
 local CoreGui          = game:GetService("CoreGui")
-
+local Workspace        = game:GetService("Workspace")
+local StarterPlayer    = game:GetService("StarterPlayer")
 local LocalPlayer  = Players.LocalPlayer
 local PlayerGui    = LocalPlayer:WaitForChild("PlayerGui")
 
--- ========================== CONFIG ============================
-local CONFIG = {
-    AutoSellInterval = 1.5,
-    Title            = "GAG2 Auto-Sell",
-    Version          = "v1.0",
-}
-
-local RARITIES = {
-    "Any", "Common", "Uncommon", "Rare", "Epic",
-    "Legendary", "Mythic", "Divine", "Prismatic", "Secret"
-}
-
+local CONFIG = { AutoSellInterval = 1.5, Title = "GAG2 Auto-Sell", Version = "v2.0" }
+local RARITIES = {"Any","Common","Uncommon","Rare","Epic","Legendary","Mythic","Divine","Prismatic","Secret"}
 local Selected = { Pets = {}, Seeds = {} }
-local RarityFilter = "Any"
-local AutoSellEnabled = false
-local CurrentTab = "Pets"
+local RarityFilter, AutoSellEnabled, CurrentTab = "Any", false, "Pets"
+local CustomRemote, SellRemote = nil, nil
 
--- ========================== REMOTE DISCOVERY ==========================
-local SellRemoteCandidates = {
-    "SellPet", "Sell_Pet", "SellPetEvent",
-    "SellItem", "Sell", "SellRemote",
-    "SellSeed", "SellInventory", "Sell_Item",
-}
+local SellRemoteCandidates = {"Sell","SellPet","SellItem","SellSeed","SellInventory","SellAll","SellThis","Remote_Sell","RE_Sell","SellEvent","TalkToNPC","NPCInteract","DialogResponse"}
 
 local function findRemote()
+    if CustomRemote then return CustomRemote end
     for _, name in ipairs(SellRemoteCandidates) do
         local found = ReplicatedStorage:FindFirstChild(name, true)
-        if found and (found:IsA("RemoteEvent") or found:IsA("RemoteFunction")) then
-            return found
-        end
+        if found and (found:IsA("RemoteEvent") or found:IsA("RemoteFunction")) then return found end
     end
     for _, d in ipairs(ReplicatedStorage:GetDescendants()) do
-        if (d:IsA("RemoteEvent") or d:IsA("RemoteFunction"))
-            and d.Name:lower():find("sell") then
-            return d
-        end
+        if (d:IsA("RemoteEvent") or d:IsA("RemoteFunction")) and d.Name:lower():find("sell") then return d end
     end
     return nil
 end
+SellRemote = findRemote()
 
-local SellRemote = findRemote()
-
-local function fireSell(itemName, uuid, category)
-    if not SellRemote then return false, "No sell remote found" end
-    local ok, err = pcall(function()
-        local args = { itemName, uuid, category }
-        if SellRemote:IsA("RemoteEvent") then
-            SellRemote:FireServer(unpack(args))
-        else
-            SellRemote:InvokeServer(unpack(args))
+local function resolvePath(path)
+    if not path or path == "" then return nil end
+    local segments = {}
+    for s in path:gmatch("[^%.%/]+") do table.insert(segments, s) end
+    for _, root in ipairs({game, ReplicatedStorage, Workspace, StarterPlayer}) do
+        local cur, ok = root, true
+        for _, seg in ipairs(segments) do
+            local nxt = cur:FindFirstChild(seg)
+            if not nxt then ok = false; break end
+            cur = nxt
         end
-    end)
-    return ok, err
+        if ok and cur ~= root then return cur end
+    end
+    local last = segments[#segments]
+    if last then return ReplicatedStorage:FindFirstChild(last, true) or Workspace:FindFirstChild(last, true) end
+    return nil
 end
 
--- ========================== INVENTORY SCAN ==========================
-local function getInventoryFolder(category)
-    local data = LocalPlayer:FindFirstChild("Data") or LocalPlayer:FindFirstChild("PlayerData")
-    if data then
-        local cat = data:FindFirstChild(category)
-        if cat then return cat end
+local function dumpRemotes()
+    print("=== [GAG2] Remote dump ===")
+    local count = 0
+    for _, root in ipairs({ReplicatedStorage, Workspace, StarterPlayer, LocalPlayer}) do
+        for _, d in ipairs(root:GetDescendants()) do
+            if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then
+                print(("[%s]  %s"):format(d.ClassName, d:GetFullName()))
+                count = count + 1
+            end
+        end
     end
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    return backpack
+    print(("=== %d remotes ==="):format(count))
+end
+
+local function fireSellNPC(choiceIndex)
+    local ok = pcall(function()
+        local mod = StarterPlayer.StarterPlayerScripts
+            and StarterPlayer.StarterPlayerScripts:FindFirstChild("Controllers")
+            and StarterPlayer.StarterPlayerScripts.Controllers:FindFirstChild("NPCController")
+            and StarterPlayer.StarterPlayerScripts.Controllers.NPCController:FindFirstChild("Sell_Steven")
+        if mod then
+            local m = require(mod)
+            if type(m) == "table" then
+                for _, fname in ipairs({"SellInventory","Sell","OnDialog","Choose","PickOption"}) do
+                    if type(m[fname]) == "function" then m[fname](choiceIndex or 1); return end
+                end
+            end
+        end
+    end)
+    if ok then return true end
+    for _, d in ipairs(Workspace:GetDescendants()) do
+        if d:IsA("ProximityPrompt") then
+            local nm = (d.Parent and d.Parent.Name or "").." "..(d.ObjectText or "").." "..(d.ActionText or "")
+            if nm:lower():find("sell") or nm:lower():find("steven") then
+                pcall(function() fireproximityprompt(d) end)
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function fireSell(itemName, uuid, category)
+    local target = CustomRemote or SellRemote
+    if target then
+        local ok = pcall(function()
+            local args = { itemName, uuid, category }
+            if target:IsA("RemoteEvent") then target:FireServer(unpack(args))
+            else target:InvokeServer(unpack(args)) end
+        end)
+        if ok then return true end
+    end
+    return fireSellNPC(1)
+end
+
+local function getInventoryFolders()
+    local out = {}
+    local function tryAdd(x) if x then table.insert(out, x) end end
+    local data = LocalPlayer:FindFirstChild("Data") or LocalPlayer:FindFirstChild("PlayerData")
+    if data then tryAdd(data); tryAdd(data:FindFirstChild("Inventory")) end
+    tryAdd(LocalPlayer:FindFirstChild("Backpack"))
+    if LocalPlayer.Character then tryAdd(LocalPlayer.Character) end
+    tryAdd(LocalPlayer:FindFirstChild("leaderstats"))
+    return out
 end
 
 local function getItemRarity(item)
-    local r = item:GetAttribute("Rarity") or item:GetAttribute("Tier")
+    local r = item:GetAttribute("Rarity") or item:GetAttribute("Tier") or item:GetAttribute("rarity")
     if r then return tostring(r) end
     local v = item:FindFirstChild("Rarity")
     if v and v:IsA("StringValue") then return v.Value end
-    return "Unknown"
+    for _, rar in ipairs(RARITIES) do
+        if rar ~= "Any" and item.Name:lower():find(rar:lower()) then return rar end
+    end
+    return "Common"
 end
 
 local function getItemUUID(item)
-    return item:GetAttribute("UUID")
-        or item:GetAttribute("Id")
-        or item:GetAttribute("UID")
-        or item.Name
+    return item:GetAttribute("UUID") or item:GetAttribute("Id") or item:GetAttribute("UID")
+        or item:GetAttribute("Guid") or item.Name
+end
+
+local function classifyItem(item)
+    local nm = item.Name:lower()
+    local cat = item:GetAttribute("Category") or item:GetAttribute("Type") or item:GetAttribute("ItemType")
+    if cat then
+        cat = tostring(cat):lower()
+        if cat:find("seed") then return "Seeds" end
+        if cat:find("pet")  then return "Pets"  end
+    end
+    if nm:find("seed") then return "Seeds" end
+    if nm:find("pet")  then return "Pets"  end
+    return nil
 end
 
 local function scanInventory(category)
-    local list = {}
-    local folder = getInventoryFolder(category)
-    if not folder then return list end
-
-    for _, item in ipairs(folder:GetChildren()) do
-        local isCategory = true
-        if folder.Name == "Backpack" then
-            local cat = item:GetAttribute("Category") or item:GetAttribute("Type")
-            isCategory = cat and tostring(cat):lower():find(category:lower():sub(1,3))
-        end
-        if isCategory then
-            table.insert(list, {
-                name     = item:GetAttribute("ItemName") or item.Name,
-                rarity   = getItemRarity(item),
-                uuid     = getItemUUID(item),
-                instance = item,
-            })
+    local list, seen = {}, {}
+    for _, folder in ipairs(getInventoryFolders()) do
+        for _, item in ipairs(folder:GetDescendants()) do
+            if item:IsA("Tool") or item:IsA("Folder") or item:IsA("StringValue")
+                or item:IsA("IntValue") or item:IsA("NumberValue") or item:IsA("Model") then
+                local belongs = false
+                if folder.Name == category then belongs = true
+                else local c = classifyItem(item); if c == category then belongs = true end end
+                if belongs and not seen[item] then
+                    seen[item] = true
+                    local count = item:GetAttribute("Count") or item:GetAttribute("Amount")
+                        or (item:IsA("IntValue") and item.Value) or 1
+                    table.insert(list, {
+                        name = item:GetAttribute("ItemName") or item.Name,
+                        rarity = getItemRarity(item), uuid = getItemUUID(item),
+                        count = count, instance = item,
+                    })
+                end
+            end
         end
     end
     return list
 end
 
--- ========================== UI BUILD ==========================
 local existing = (CoreGui:FindFirstChild("GAG2AutoSell")) or PlayerGui:FindFirstChild("GAG2AutoSell")
 if existing then existing:Destroy() end
-
 local parentGui = CoreGui
-local ok = pcall(function() return CoreGui.Name end)
-if not ok then parentGui = PlayerGui end
+if not pcall(function() return CoreGui.Name end) then parentGui = PlayerGui end
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "GAG2AutoSell"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.Parent = parentGui
+ScreenGui.Name = "GAG2AutoSell"; ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling; ScreenGui.Parent = parentGui
 
 local function newInst(class, props)
     local i = Instance.new(class)
@@ -133,254 +182,152 @@ local function newInst(class, props)
     return i
 end
 
-local Main = newInst("Frame", {
-    Name = "Main",
-    Size = UDim2.new(0, 420, 0, 420),
-    Position = UDim2.new(0.5, -210, 0.5, -210),
-    BackgroundColor3 = Color3.fromRGB(22, 28, 24),
-    BorderSizePixel = 0,
-    Parent = ScreenGui,
-    Active = true,
-    Draggable = false,
-})
+local Main = newInst("Frame", { Size = UDim2.new(0, 440, 0, 480),
+    Position = UDim2.new(0.5, -220, 0.5, -240),
+    BackgroundColor3 = Color3.fromRGB(22, 28, 24), BorderSizePixel = 0,
+    Parent = ScreenGui, Active = true })
 newInst("UICorner", { CornerRadius = UDim.new(0, 10), Parent = Main })
-newInst("UIStroke", {
-    Color = Color3.fromRGB(80, 180, 110),
-    Thickness = 1.5,
-    Transparency = 0.4,
-    Parent = Main,
-})
+newInst("UIStroke", { Color = Color3.fromRGB(80, 180, 110), Thickness = 1.5, Transparency = 0.4, Parent = Main })
 
-local TopBar = newInst("Frame", {
-    Name = "TopBar",
-    Size = UDim2.new(1, 0, 0, 38),
-    BackgroundColor3 = Color3.fromRGB(28, 38, 30),
-    BorderSizePixel = 0,
-    Parent = Main,
-})
+local TopBar = newInst("Frame", { Size = UDim2.new(1, 0, 0, 38),
+    BackgroundColor3 = Color3.fromRGB(28, 38, 30), BorderSizePixel = 0, Parent = Main })
 newInst("UICorner", { CornerRadius = UDim.new(0, 10), Parent = TopBar })
 
-newInst("TextLabel", {
-    Name = "Title",
-    Size = UDim2.new(1, -80, 1, 0),
-    Position = UDim2.new(0, 12, 0, 0),
-    BackgroundTransparency = 1,
-    Text = CONFIG.Title .. "  " .. CONFIG.Version,
-    Font = Enum.Font.GothamBold,
-    TextSize = 16,
-    TextColor3 = Color3.fromRGB(170, 230, 180),
-    TextXAlignment = Enum.TextXAlignment.Left,
-    Parent = TopBar,
-})
+newInst("TextLabel", { Size = UDim2.new(1, -80, 1, 0), Position = UDim2.new(0, 12, 0, 0),
+    BackgroundTransparency = 1, Text = CONFIG.Title .. "  " .. CONFIG.Version,
+    Font = Enum.Font.GothamBold, TextSize = 16, TextColor3 = Color3.fromRGB(170, 230, 180),
+    TextXAlignment = Enum.TextXAlignment.Left, Parent = TopBar })
 
-local CloseBtn = newInst("TextButton", {
-    Name = "Close",
-    Size = UDim2.new(0, 30, 0, 30),
-    Position = UDim2.new(1, -36, 0, 4),
-    BackgroundColor3 = Color3.fromRGB(180, 60, 60),
-    Text = "X",
-    Font = Enum.Font.GothamBold,
-    TextSize = 14,
-    TextColor3 = Color3.fromRGB(255,255,255),
-    Parent = TopBar,
-})
+local CloseBtn = newInst("TextButton", { Size = UDim2.new(0, 30, 0, 30), Position = UDim2.new(1, -36, 0, 4),
+    BackgroundColor3 = Color3.fromRGB(180, 60, 60), Text = "X", Font = Enum.Font.GothamBold,
+    TextSize = 14, TextColor3 = Color3.fromRGB(255,255,255), Parent = TopBar })
 newInst("UICorner", { CornerRadius = UDim.new(0, 6), Parent = CloseBtn })
 
-local MinBtn = newInst("TextButton", {
-    Name = "Min",
-    Size = UDim2.new(0, 30, 0, 30),
-    Position = UDim2.new(1, -70, 0, 4),
-    BackgroundColor3 = Color3.fromRGB(60, 110, 70),
-    Text = "_",
-    Font = Enum.Font.GothamBold,
-    TextSize = 14,
-    TextColor3 = Color3.fromRGB(255,255,255),
-    Parent = TopBar,
-})
+local MinBtn = newInst("TextButton", { Size = UDim2.new(0, 30, 0, 30), Position = UDim2.new(1, -70, 0, 4),
+    BackgroundColor3 = Color3.fromRGB(60, 110, 70), Text = "_", Font = Enum.Font.GothamBold,
+    TextSize = 14, TextColor3 = Color3.fromRGB(255,255,255), Parent = TopBar })
 newInst("UICorner", { CornerRadius = UDim.new(0, 6), Parent = MinBtn })
 
-local TabsHolder = newInst("Frame", {
-    Size = UDim2.new(1, -20, 0, 32),
-    Position = UDim2.new(0, 10, 0, 46),
-    BackgroundTransparency = 1,
-    Parent = Main,
-})
+local TabsHolder = newInst("Frame", { Size = UDim2.new(1, -20, 0, 32),
+    Position = UDim2.new(0, 10, 0, 46), BackgroundTransparency = 1, Parent = Main })
 
 local function makeTab(name, x)
-    local b = newInst("TextButton", {
-        Name = name,
-        Size = UDim2.new(0, 90, 1, 0),
-        Position = UDim2.new(0, x, 0, 0),
-        BackgroundColor3 = Color3.fromRGB(35, 50, 38),
-        Text = name,
-        Font = Enum.Font.GothamMedium,
-        TextSize = 14,
-        TextColor3 = Color3.fromRGB(220,220,220),
-        Parent = TabsHolder,
-    })
+    local b = newInst("TextButton", { Size = UDim2.new(0, 90, 1, 0), Position = UDim2.new(0, x, 0, 0),
+        BackgroundColor3 = Color3.fromRGB(35, 50, 38), Text = name, Font = Enum.Font.GothamMedium,
+        TextSize = 14, TextColor3 = Color3.fromRGB(220,220,220), Parent = TabsHolder })
     newInst("UICorner", { CornerRadius = UDim.new(0,6), Parent = b })
     return b
 end
-local PetsTab  = makeTab("Pets", 0)
-local SeedsTab = makeTab("Seeds", 96)
+local PetsTab, SeedsTab = makeTab("Pets", 0), makeTab("Seeds", 96)
 
-local FilterHolder = newInst("Frame", {
-    Size = UDim2.new(1, -20, 0, 32),
-    Position = UDim2.new(0, 10, 0, 84),
-    BackgroundTransparency = 1,
-    Parent = Main,
-})
+local RemotePathBox = newInst("TextBox", { Size = UDim2.new(0, 220, 0, 28),
+    Position = UDim2.new(1, -230, 0, 48), BackgroundColor3 = Color3.fromRGB(35, 50, 38),
+    PlaceholderText = "Remote path (optional)", Text = "", Font = Enum.Font.Gotham, TextSize = 12,
+    TextColor3 = Color3.fromRGB(230,230,230), PlaceholderColor3 = Color3.fromRGB(150,150,150),
+    ClearTextOnFocus = false, Parent = Main })
+newInst("UICorner", { CornerRadius = UDim.new(0,6), Parent = RemotePathBox })
+newInst("UIPadding", { PaddingLeft = UDim.new(0, 6), Parent = RemotePathBox })
 
-local SearchBox = newInst("TextBox", {
-    Size = UDim2.new(0, 200, 1, 0),
-    Position = UDim2.new(0, 0, 0, 0),
-    BackgroundColor3 = Color3.fromRGB(35, 50, 38),
-    PlaceholderText = "Search...",
-    Text = "",
-    Font = Enum.Font.Gotham,
-    TextSize = 13,
-    TextColor3 = Color3.fromRGB(230,230,230),
-    PlaceholderColor3 = Color3.fromRGB(150,150,150),
-    ClearTextOnFocus = false,
-    Parent = FilterHolder,
-})
+local FilterHolder = newInst("Frame", { Size = UDim2.new(1, -20, 0, 32),
+    Position = UDim2.new(0, 10, 0, 84), BackgroundTransparency = 1, Parent = Main })
+
+local SearchBox = newInst("TextBox", { Size = UDim2.new(0, 210, 1, 0),
+    BackgroundColor3 = Color3.fromRGB(35, 50, 38), PlaceholderText = "Search...", Text = "",
+    Font = Enum.Font.Gotham, TextSize = 13, TextColor3 = Color3.fromRGB(230,230,230),
+    PlaceholderColor3 = Color3.fromRGB(150,150,150), ClearTextOnFocus = false, Parent = FilterHolder })
 newInst("UICorner", { CornerRadius = UDim.new(0,6), Parent = SearchBox })
 newInst("UIPadding", { PaddingLeft = UDim.new(0, 8), Parent = SearchBox })
 
-local RarityBtn = newInst("TextButton", {
-    Size = UDim2.new(0, 160, 1, 0),
-    Position = UDim2.new(0, 210, 0, 0),
-    BackgroundColor3 = Color3.fromRGB(35, 50, 38),
-    Text = "Rarity: Any  v",
-    Font = Enum.Font.Gotham,
-    TextSize = 13,
-    TextColor3 = Color3.fromRGB(230,230,230),
-    Parent = FilterHolder,
-})
+local RarityBtn = newInst("TextButton", { Size = UDim2.new(0, 160, 1, 0),
+    Position = UDim2.new(0, 220, 0, 0), BackgroundColor3 = Color3.fromRGB(35, 50, 38),
+    Text = "Rarity: Any  v", Font = Enum.Font.Gotham, TextSize = 13,
+    TextColor3 = Color3.fromRGB(230,230,230), Parent = FilterHolder })
 newInst("UICorner", { CornerRadius = UDim.new(0,6), Parent = RarityBtn })
 
-local RarityList = newInst("Frame", {
-    Size = UDim2.new(0, 160, 0, #RARITIES * 26),
-    Position = UDim2.new(0, 210, 0, 36),
-    BackgroundColor3 = Color3.fromRGB(28, 38, 30),
-    Visible = false,
-    ZIndex = 10,
-    Parent = FilterHolder,
-})
+local RarityList = newInst("Frame", { Size = UDim2.new(0, 160, 0, #RARITIES * 26),
+    Position = UDim2.new(0, 220, 0, 36), BackgroundColor3 = Color3.fromRGB(28, 38, 30),
+    Visible = false, ZIndex = 10, Parent = FilterHolder })
 newInst("UICorner", { CornerRadius = UDim.new(0,6), Parent = RarityList })
 newInst("UIListLayout", { Parent = RarityList })
 
 for _, r in ipairs(RARITIES) do
-    local opt = newInst("TextButton", {
-        Size = UDim2.new(1, 0, 0, 26),
-        BackgroundTransparency = 1,
-        Text = r,
-        Font = Enum.Font.Gotham,
-        TextSize = 13,
-        TextColor3 = Color3.fromRGB(220,220,220),
-        ZIndex = 11,
-        Parent = RarityList,
-    })
+    local opt = newInst("TextButton", { Size = UDim2.new(1, 0, 0, 26),
+        BackgroundTransparency = 1, Text = r, Font = Enum.Font.Gotham, TextSize = 13,
+        TextColor3 = Color3.fromRGB(220,220,220), ZIndex = 11, Parent = RarityList })
     opt.MouseButton1Click:Connect(function()
-        RarityFilter = r
-        RarityBtn.Text = "Rarity: " .. r .. "  v"
-        RarityList.Visible = false
+        RarityFilter = r; RarityBtn.Text = "Rarity: " .. r .. "  v"; RarityList.Visible = false
     end)
 end
+RarityBtn.MouseButton1Click:Connect(function() RarityList.Visible = not RarityList.Visible end)
 
-RarityBtn.MouseButton1Click:Connect(function()
-    RarityList.Visible = not RarityList.Visible
-end)
-
-local ItemList = newInst("ScrollingFrame", {
-    Size = UDim2.new(1, -20, 1, -200),
-    Position = UDim2.new(0, 10, 0, 124),
-    BackgroundColor3 = Color3.fromRGB(18, 24, 20),
-    BorderSizePixel = 0,
-    CanvasSize = UDim2.new(0,0,0,0),
-    ScrollBarThickness = 6,
-    ScrollBarImageColor3 = Color3.fromRGB(80, 180, 110),
-    Parent = Main,
-})
+local ItemList = newInst("ScrollingFrame", { Size = UDim2.new(1, -20, 1, -240),
+    Position = UDim2.new(0, 10, 0, 124), BackgroundColor3 = Color3.fromRGB(18, 24, 20),
+    BorderSizePixel = 0, CanvasSize = UDim2.new(0,0,0,0), ScrollBarThickness = 6,
+    ScrollBarImageColor3 = Color3.fromRGB(80, 180, 110), Parent = Main })
 newInst("UICorner", { CornerRadius = UDim.new(0,6), Parent = ItemList })
-local listLayout = newInst("UIListLayout", {
-    Parent = ItemList,
-    Padding = UDim.new(0, 4),
-    SortOrder = Enum.SortOrder.LayoutOrder,
-})
-newInst("UIPadding", {
-    PaddingTop = UDim.new(0, 6),
-    PaddingLeft = UDim.new(0, 6),
-    PaddingRight = UDim.new(0, 6),
-    Parent = ItemList,
-})
+local listLayout = newInst("UIListLayout", { Parent = ItemList, Padding = UDim.new(0, 4),
+    SortOrder = Enum.SortOrder.LayoutOrder })
+newInst("UIPadding", { PaddingTop = UDim.new(0, 6), PaddingLeft = UDim.new(0, 6),
+    PaddingRight = UDim.new(0, 6), Parent = ItemList })
 
-local BottomHolder = newInst("Frame", {
-    Size = UDim2.new(1, -20, 0, 64),
-    Position = UDim2.new(0, 10, 1, -72),
-    BackgroundTransparency = 1,
-    Parent = Main,
-})
+local BottomHolder = newInst("Frame", { Size = UDim2.new(1, -20, 0, 100),
+    Position = UDim2.new(0, 10, 1, -108), BackgroundTransparency = 1, Parent = Main })
 
-local AutoToggle = newInst("TextButton", {
-    Size = UDim2.new(0, 180, 0, 28),
-    Position = UDim2.new(0, 0, 0, 0),
-    BackgroundColor3 = Color3.fromRGB(70, 70, 70),
-    Text = "Auto-Sell: OFF",
-    Font = Enum.Font.GothamBold,
-    TextSize = 13,
-    TextColor3 = Color3.fromRGB(240,240,240),
-    Parent = BottomHolder,
-})
+local AutoToggle = newInst("TextButton", { Size = UDim2.new(0, 170, 0, 28),
+    BackgroundColor3 = Color3.fromRGB(70, 70, 70), Text = "Auto-Sell: OFF",
+    Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = Color3.fromRGB(240,240,240),
+    Parent = BottomHolder })
 newInst("UICorner", { CornerRadius = UDim.new(0,6), Parent = AutoToggle })
 
-local SellNow = newInst("TextButton", {
-    Size = UDim2.new(0, 130, 0, 28),
-    Position = UDim2.new(0, 190, 0, 0),
-    BackgroundColor3 = Color3.fromRGB(60, 140, 80),
-    Text = "Sell Now",
-    Font = Enum.Font.GothamBold,
-    TextSize = 13,
-    TextColor3 = Color3.fromRGB(255,255,255),
-    Parent = BottomHolder,
-})
+local SellNow = newInst("TextButton", { Size = UDim2.new(0, 110, 0, 28),
+    Position = UDim2.new(0, 180, 0, 0), BackgroundColor3 = Color3.fromRGB(60, 140, 80),
+    Text = "Sell Now", Font = Enum.Font.GothamBold, TextSize = 13,
+    TextColor3 = Color3.fromRGB(255,255,255), Parent = BottomHolder })
 newInst("UICorner", { CornerRadius = UDim.new(0,6), Parent = SellNow })
 
-local RefreshBtn = newInst("TextButton", {
-    Size = UDim2.new(0, 70, 0, 28),
-    Position = UDim2.new(1, -70, 0, 0),
-    BackgroundColor3 = Color3.fromRGB(50, 80, 130),
-    Text = "Refresh",
-    Font = Enum.Font.GothamBold,
-    TextSize = 13,
-    TextColor3 = Color3.fromRGB(255,255,255),
-    Parent = BottomHolder,
-})
+local TalkNPC = newInst("TextButton", { Size = UDim2.new(0, 110, 0, 28),
+    Position = UDim2.new(0, 296, 0, 0), BackgroundColor3 = Color3.fromRGB(140, 100, 50),
+    Text = "Sell via NPC", Font = Enum.Font.GothamBold, TextSize = 13,
+    TextColor3 = Color3.fromRGB(255,255,255), Parent = BottomHolder })
+newInst("UICorner", { CornerRadius = UDim.new(0,6), Parent = TalkNPC })
+
+local RefreshBtn = newInst("TextButton", { Size = UDim2.new(0, 90, 0, 28),
+    Position = UDim2.new(0, 0, 0, 36), BackgroundColor3 = Color3.fromRGB(50, 80, 130),
+    Text = "Refresh", Font = Enum.Font.GothamBold, TextSize = 13,
+    TextColor3 = Color3.fromRGB(255,255,255), Parent = BottomHolder })
 newInst("UICorner", { CornerRadius = UDim.new(0,6), Parent = RefreshBtn })
 
-local Status = newInst("TextLabel", {
-    Size = UDim2.new(1, 0, 0, 24),
-    Position = UDim2.new(0, 0, 0, 36),
-    BackgroundTransparency = 1,
-    Text = SellRemote and ("Remote: " .. SellRemote.Name) or "WARNING: sell remote not detected",
-    Font = Enum.Font.Gotham,
-    TextSize = 12,
-    TextColor3 = SellRemote and Color3.fromRGB(150,200,160) or Color3.fromRGB(230, 130, 130),
-    TextXAlignment = Enum.TextXAlignment.Left,
-    Parent = BottomHolder,
-})
+local ScanBtn = newInst("TextButton", { Size = UDim2.new(0, 130, 0, 28),
+    Position = UDim2.new(0, 96, 0, 36), BackgroundColor3 = Color3.fromRGB(110, 80, 140),
+    Text = "Scan Remotes", Font = Enum.Font.GothamBold, TextSize = 13,
+    TextColor3 = Color3.fromRGB(255,255,255), Parent = BottomHolder })
+newInst("UICorner", { CornerRadius = UDim.new(0,6), Parent = ScanBtn })
 
--- ========================== UI LOGIC ==========================
-local function setStatus(text, ok)
+local SetRemoteBtn = newInst("TextButton", { Size = UDim2.new(0, 100, 0, 28),
+    Position = UDim2.new(0, 232, 0, 36), BackgroundColor3 = Color3.fromRGB(80, 130, 110),
+    Text = "Set Remote", Font = Enum.Font.GothamBold, TextSize = 13,
+    TextColor3 = Color3.fromRGB(255,255,255), Parent = BottomHolder })
+newInst("UICorner", { CornerRadius = UDim.new(0,6), Parent = SetRemoteBtn })
+
+local Status = newInst("TextLabel", { Size = UDim2.new(1, 0, 0, 28),
+    Position = UDim2.new(0, 0, 0, 72), BackgroundTransparency = 1,
+    Text = SellRemote and ("Remote: " .. SellRemote:GetFullName())
+        or "Sell remote NOT detected — try 'Sell via NPC' or 'Scan Remotes'",
+    Font = Enum.Font.Gotham, TextSize = 12,
+    TextColor3 = SellRemote and Color3.fromRGB(150,200,160) or Color3.fromRGB(230, 170, 100),
+    TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, Parent = BottomHolder })
+
+local function setStatus(text, level)
     Status.Text = text
-    Status.TextColor3 = ok and Color3.fromRGB(150,200,160) or Color3.fromRGB(230, 130, 130)
+    if level == "ok" then Status.TextColor3 = Color3.fromRGB(150,200,160)
+    elseif level == "warn" then Status.TextColor3 = Color3.fromRGB(230, 200, 100)
+    else Status.TextColor3 = Color3.fromRGB(230, 130, 130) end
 end
 
-local refreshList -- forward decl
-
+local refreshList
 local function setTab(tab)
     CurrentTab = tab
-    PetsTab.BackgroundColor3  = tab == "Pets"  and Color3.fromRGB(60, 140, 80) or Color3.fromRGB(35, 50, 38)
+    PetsTab.BackgroundColor3 = tab == "Pets" and Color3.fromRGB(60, 140, 80) or Color3.fromRGB(35, 50, 38)
     SeedsTab.BackgroundColor3 = tab == "Seeds" and Color3.fromRGB(60, 140, 80) or Color3.fromRGB(35, 50, 38)
 end
 PetsTab.MouseButton1Click:Connect(function() setTab("Pets"); refreshList() end)
@@ -389,51 +336,25 @@ SeedsTab.MouseButton1Click:Connect(function() setTab("Seeds"); refreshList() end
 local function makeRow(item)
     local key = item.name .. "|" .. tostring(item.rarity)
     local isSelected = Selected[CurrentTab][key] == true
-
-    local row = newInst("Frame", {
-        Size = UDim2.new(1, -12, 0, 30),
-        BackgroundColor3 = Color3.fromRGB(30, 40, 32),
-        BorderSizePixel = 0,
-        Parent = ItemList,
-    })
+    local row = newInst("Frame", { Size = UDim2.new(1, -12, 0, 30),
+        BackgroundColor3 = Color3.fromRGB(30, 40, 32), BorderSizePixel = 0, Parent = ItemList })
     newInst("UICorner", { CornerRadius = UDim.new(0,4), Parent = row })
-
-    local check = newInst("TextButton", {
-        Size = UDim2.new(0, 22, 0, 22),
+    local check = newInst("TextButton", { Size = UDim2.new(0, 22, 0, 22),
         Position = UDim2.new(0, 6, 0, 4),
         BackgroundColor3 = isSelected and Color3.fromRGB(60, 180, 90) or Color3.fromRGB(60, 60, 60),
-        Text = isSelected and "X" or "",
-        Font = Enum.Font.GothamBold,
-        TextSize = 14,
-        TextColor3 = Color3.fromRGB(255,255,255),
-        Parent = row,
-    })
+        Text = isSelected and "X" or "", Font = Enum.Font.GothamBold, TextSize = 14,
+        TextColor3 = Color3.fromRGB(255,255,255), Parent = row })
     newInst("UICorner", { CornerRadius = UDim.new(0,4), Parent = check })
-
-    newInst("TextLabel", {
-        Size = UDim2.new(1, -120, 1, 0),
-        Position = UDim2.new(0, 34, 0, 0),
-        BackgroundTransparency = 1,
-        Text = item.name,
-        Font = Enum.Font.Gotham,
-        TextSize = 13,
-        TextColor3 = Color3.fromRGB(230,230,230),
-        TextXAlignment = Enum.TextXAlignment.Left,
-        Parent = row,
-    })
-
-    newInst("TextLabel", {
-        Size = UDim2.new(0, 80, 1, 0),
-        Position = UDim2.new(1, -86, 0, 0),
-        BackgroundTransparency = 1,
-        Text = item.rarity,
-        Font = Enum.Font.GothamMedium,
-        TextSize = 12,
-        TextColor3 = Color3.fromRGB(180, 220, 190),
-        TextXAlignment = Enum.TextXAlignment.Right,
-        Parent = row,
-    })
-
+    local label = item.name
+    if item.count and tonumber(item.count) and tonumber(item.count) > 1 then
+        label = label .. "  x" .. tostring(item.count)
+    end
+    newInst("TextLabel", { Size = UDim2.new(1, -120, 1, 0), Position = UDim2.new(0, 34, 0, 0),
+        BackgroundTransparency = 1, Text = label, Font = Enum.Font.Gotham, TextSize = 13,
+        TextColor3 = Color3.fromRGB(230,230,230), TextXAlignment = Enum.TextXAlignment.Left, Parent = row })
+    newInst("TextLabel", { Size = UDim2.new(0, 80, 1, 0), Position = UDim2.new(1, -86, 0, 0),
+        BackgroundTransparency = 1, Text = item.rarity, Font = Enum.Font.GothamMedium, TextSize = 12,
+        TextColor3 = Color3.fromRGB(180, 220, 190), TextXAlignment = Enum.TextXAlignment.Right, Parent = row })
     check.MouseButton1Click:Connect(function()
         Selected[CurrentTab][key] = not Selected[CurrentTab][key] or nil
         local on = Selected[CurrentTab][key] == true
@@ -450,37 +371,42 @@ refreshList = function()
     local seen, uniq = {}, {}
     for _, it in ipairs(list) do
         local k = it.name .. "|" .. it.rarity
-        if not seen[k] then
-            seen[k] = true
-            table.insert(uniq, it)
-        end
+        if not seen[k] then seen[k] = true; table.insert(uniq, it) end
     end
     local search = SearchBox.Text:lower()
     for _, it in ipairs(uniq) do
         local matchSearch = search == "" or it.name:lower():find(search, 1, true)
         local matchRarity = RarityFilter == "Any" or it.rarity == RarityFilter
-        if matchSearch and matchRarity then
-            makeRow(it)
-        end
+        if matchSearch and matchRarity then makeRow(it) end
     end
     ItemList.CanvasSize = UDim2.new(0,0,0, listLayout.AbsoluteContentSize.Y + 12)
     if #uniq == 0 then
-        newInst("TextLabel", {
-            Size = UDim2.new(1, -12, 0, 60),
-            BackgroundTransparency = 1,
-            Text = "No " .. CurrentTab:lower() .. " found in your inventory.",
-            Font = Enum.Font.Gotham,
-            TextSize = 13,
-            TextColor3 = Color3.fromRGB(180,180,180),
-            Parent = ItemList,
-        })
+        newInst("TextLabel", { Size = UDim2.new(1, -12, 0, 60), BackgroundTransparency = 1,
+            Text = "No "..CurrentTab:lower().." found. Click 'Refresh' or use 'Sell via NPC'.",
+            Font = Enum.Font.Gotham, TextSize = 13, TextColor3 = Color3.fromRGB(180,180,180),
+            TextWrapped = true, Parent = ItemList })
     end
 end
 
 SearchBox:GetPropertyChangedSignal("Text"):Connect(refreshList)
 RefreshBtn.MouseButton1Click:Connect(refreshList)
 
--- ========================== SELL LOGIC ==========================
+ScanBtn.MouseButton1Click:Connect(function()
+    dumpRemotes()
+    setStatus("Remote dump printed to executor console.", "warn")
+end)
+
+SetRemoteBtn.MouseButton1Click:Connect(function()
+    local path = RemotePathBox.Text
+    local found = resolvePath(path)
+    if found and (found:IsA("RemoteEvent") or found:IsA("RemoteFunction")) then
+        CustomRemote = found; SellRemote = found
+        setStatus("Remote set: " .. found:GetFullName(), "ok")
+    else
+        setStatus("Could not resolve: " .. tostring(path), "err")
+    end
+end)
+
 local function performSell(verbose)
     local total, sold, failed = 0, 0, 0
     local list = scanInventory(CurrentTab)
@@ -491,82 +417,71 @@ local function performSell(verbose)
             total = total + 1
             local ok = fireSell(it.name, it.uuid, CurrentTab)
             if ok then sold = sold + 1 else failed = failed + 1 end
-            task.wait(0.08)
+            task.wait(0.1)
         end
     end
     if verbose then
-        setStatus(("Sold %d/%d (%s failed)"):format(sold, total, failed), failed == 0)
+        if total == 0 then setStatus("Nothing selected. Tick items first.", "warn")
+        else setStatus(("Sold %d/%d (%d failed)"):format(sold, total, failed),
+            failed == 0 and "ok" or "warn") end
     end
     return sold
 end
 
 SellNow.MouseButton1Click:Connect(function()
-    if not SellRemote then
-        setStatus("No sell remote found", false); return
-    end
-    setStatus("Selling...", true)
-    task.spawn(function() performSell(true) end)
+    setStatus("Selling...", "ok"); task.spawn(function() performSell(true) end)
+end)
+
+TalkNPC.MouseButton1Click:Connect(function()
+    setStatus("Talking to Sell NPC...", "ok")
+    task.spawn(function()
+        local ok = fireSellNPC(1)
+        setStatus(ok and "NPC sell triggered" or "Could not find Sell NPC nearby",
+            ok and "ok" or "err")
+    end)
 end)
 
 AutoToggle.MouseButton1Click:Connect(function()
     AutoSellEnabled = not AutoSellEnabled
     AutoToggle.Text = "Auto-Sell: " .. (AutoSellEnabled and "ON" or "OFF")
-    AutoToggle.BackgroundColor3 = AutoSellEnabled
-        and Color3.fromRGB(60, 180, 90)
-        or Color3.fromRGB(70, 70, 70)
+    AutoToggle.BackgroundColor3 = AutoSellEnabled and Color3.fromRGB(60, 180, 90) or Color3.fromRGB(70, 70, 70)
 end)
 
 task.spawn(function()
     while ScreenGui.Parent do
-        if AutoSellEnabled and SellRemote then
-            performSell(false)
-        end
+        if AutoSellEnabled then performSell(false) end
         task.wait(CONFIG.AutoSellInterval)
     end
 end)
 
--- ========================== DRAG ==========================
 do
     local dragging, dragStart, startPos
     TopBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-            or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = Main.Position
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; dragStart = input.Position; startPos = Main.Position
             input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
             end)
         end
     end)
     UserInputService.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-            or input.UserInputType == Enum.UserInputType.Touch) then
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             local delta = input.Position - dragStart
-            Main.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + delta.X,
-                startPos.Y.Scale, startPos.Y.Offset + delta.Y
-            )
+            Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         end
     end)
 end
 
--- ========================== MIN / CLOSE ==========================
-local minimized = false
-local savedSize = Main.Size
+local minimized, savedSize = false, Main.Size
 MinBtn.MouseButton1Click:Connect(function()
     minimized = not minimized
-    if minimized then
-        savedSize = Main.Size
-        TweenService:Create(Main, TweenInfo.new(0.2), { Size = UDim2.new(0, 420, 0, 38) }):Play()
-    else
-        TweenService:Create(Main, TweenInfo.new(0.2), { Size = savedSize }):Play()
-    end
+    if minimized then savedSize = Main.Size
+        TweenService:Create(Main, TweenInfo.new(0.2), { Size = UDim2.new(0, 440, 0, 38) }):Play()
+    else TweenService:Create(Main, TweenInfo.new(0.2), { Size = savedSize }):Play() end
 end)
+CloseBtn.MouseButton1Click:Connect(function() AutoSellEnabled = false; ScreenGui:Destroy() end)
 
-CloseBtn.MouseButton1Click:Connect(function()
-    AutoSellEnabled = false
-    ScreenGui:Destroy()
-end)
+setTab("Pets"); refreshList()
+print("[GAG2 Auto-Sell v2] Loaded. Remote:", SellRemote and SellRemote:GetFullName() or "NONE")
+print("[GAG2 Auto-Sell v2] Click 'Scan Remotes' to discover the game's sell remote.")
