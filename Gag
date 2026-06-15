@@ -12,6 +12,53 @@ local CFG = { LoopInterval = 5, NPCName = "Steven", TeleportBack = true }
 local Selected = { Pets = {}, Seeds = {} }
 local AutoOn, CurrentTab = false, "Pets"
 
+-- ============ ITEM CATALOG (ported from gag2.lua) ============
+local SEEDS_LIST = {
+    "Carrot", "Strawberry", "Blueberry", "Tulip", "Tomato", "Apple",
+    "Bamboo", "Corn", "Cactus", "Pineapple", "Mushroom", "Green Bean",
+    "Banana", "Grape", "Coconut", "Mango", "Dragon Fruit", "Acorn",
+    "Cherry", "Sunflower", "Venus Fly Trap", "Pomegranate", "Poision Apple",
+    "Moon Bloom", "Dragon's Breath", "Ghost Pepper",
+    "Gold", "Poison Ivy", "Rainbow"
+}
+
+local PETS_LIST = {
+    "Raccoon", "Black Dragon", "BlackDragon", "Ice Serpent", "IceSerpent", "Unicorn",
+    "Bee", "Golden Dragonfly", "GoldenDragonfly", "DragonFly", "Dragonfly", "Deer", "Bunny",
+    "Frog",
+    "Robin", "Owl", "Monkey"
+}
+
+local function normalizeName(s)
+    return (tostring(s):lower():gsub("[%s_%-:]", ""))
+end
+
+local SEED_SET, PET_SET = {}, {}
+for _, n in ipairs(SEEDS_LIST) do SEED_SET[normalizeName(n)] = n end
+for _, n in ipairs(PETS_LIST)  do PET_SET[normalizeName(n)]  = n end
+
+local function stripInvPrefix(name)
+    local s = tostring(name)
+    s = s:gsub("^Inv_Pets:", "")
+    s = s:gsub("^Inv_Seeds:", "")
+    s = s:gsub("^Inv_Crates:", "")
+    s = s:gsub("^Inv_Mushrooms:", "")
+    s = s:gsub("^Inv_Sprinklers:", "")
+    s = s:gsub("^Inv_WateringCans:", "")
+    return s
+end
+
+local function categorizeItem(rawName)
+    local clean = stripInvPrefix(rawName)
+    local key = normalizeName(clean)
+    local low = tostring(rawName):lower()
+    if low:sub(1,9)  == "inv_pets:"  then return "Pets",  clean end
+    if low:sub(1,10) == "inv_seeds:" then return "Seeds", clean end
+    if PET_SET[key]  then return "Pets",  PET_SET[key]  end
+    if SEED_SET[key] then return "Seeds", SEED_SET[key] end
+    return nil
+end
+
 -- ============ HELPERS ============
 local function getSellPrompt()
     local npcs = Workspace:FindFirstChild("NPCS") or Workspace:FindFirstChild("NPCs")
@@ -23,61 +70,57 @@ local function getSellPrompt()
     return hrp:FindFirstChildOfClass("ProximityPrompt"), hrp
 end
 
-local function getInventoryFolder()
-    local bp = PlayerGui:FindFirstChild("BackpackGui")
-    if not bp then return nil end
-    return bp:FindFirstChild("Backpack") and bp.Backpack:FindFirstChild("Inventory")
-end
-
--- collect items from a backpack tab (e.g. "Pets" / "All")
-local function scanBackpack(tabName)
-    local inv = getInventoryFolder()
-    local list = {}
-    if not inv then return list end
-    -- click the tab first so the right items are shown
-    local sb = inv:FindFirstChild("SideBar")
-    if sb then
-        local tabBtn = sb:FindFirstChild(tabName) or sb:FindFirstChild("All")
-        if tabBtn and tabBtn:FindFirstChildOfClass("ImageButton") then
-            -- visually highlight (best-effort)
-        end
-    end
-    -- the items live as descendants with Tool-style attributes
-    for _, d in ipairs(inv:GetDescendants()) do
-        if d:IsA("ImageButton") or d:IsA("TextButton") then
-            local nm = d:GetAttribute("ItemName") or d:GetAttribute("Name") or d.Name
-            if nm and nm ~= "Button" and nm ~= "ImageButton" then
-                local rarity = d:GetAttribute("Rarity") or "Common"
-                table.insert(list, { name = nm, rarity = tostring(rarity), button = d })
-            end
-        end
-    end
-    return list
-end
-
--- also scan Backpack (held tools) + character
 local function scanTools(category)
     local list = {}
     local sources = { LocalPlayer:FindFirstChild("Backpack"), LocalPlayer.Character }
+    local seen = {}
     for _, src in ipairs(sources) do
         if src then
             for _, t in ipairs(src:GetChildren()) do
                 if t:IsA("Tool") then
-                    local nm = t.Name:lower()
-                    local cat = t:GetAttribute("Category") or t:GetAttribute("Type") or ""
-                    local matchPets  = nm:find("pet")  or tostring(cat):lower():find("pet")
-                    local matchSeeds = nm:find("seed") or tostring(cat):lower():find("seed")
-                    if (category == "Pets" and matchPets) or (category == "Seeds" and matchSeeds) then
-                        table.insert(list, {
-                            name = t:GetAttribute("ItemName") or t.Name,
-                            rarity = t:GetAttribute("Rarity") or "Common",
-                            tool = t,
-                        })
+                    local cat, displayName = categorizeItem(t.Name)
+                    if not cat then
+                        local attrCat = tostring(t:GetAttribute("Category") or t:GetAttribute("Type") or ""):lower()
+                        if attrCat:find("pet")  then cat = "Pets"  end
+                        if attrCat:find("seed") then cat = "Seeds" end
+                        if cat then displayName = stripInvPrefix(t:GetAttribute("ItemName") or t.Name) end
+                    end
+                    if cat == category then
+                        local rarity = t:GetAttribute("Rarity") or t:GetAttribute("Tier") or "Common"
+                        local key = (displayName or t.Name) .. "|" .. tostring(rarity)
+                        if not seen[key] then
+                            seen[key] = true
+                            table.insert(list, {
+                                name   = displayName or t.Name,
+                                rarity = tostring(rarity),
+                                tool   = t,
+                            })
+                        end
                     end
                 end
             end
         end
     end
+
+    local prefix = (category == "Pets") and "Inv_Pets:" or "Inv_Seeds:"
+    for _, gui in ipairs(PlayerGui:GetDescendants()) do
+        local nm = gui.Name
+        if type(nm) == "string" and nm:sub(1, #prefix) == prefix then
+            local clean = nm:sub(#prefix + 1)
+            local rarity = gui:GetAttribute("Rarity") or gui:GetAttribute("Tier") or "Common"
+            local key = clean .. "|" .. tostring(rarity)
+            if not seen[key] then
+                seen[key] = true
+                table.insert(list, {
+                    name    = clean,
+                    rarity  = tostring(rarity),
+                    tool    = nil,
+                    uiFrame = gui,
+                })
+            end
+        end
+    end
+
     return list
 end
 
@@ -89,15 +132,11 @@ local function equipTool(tool)
 end
 
 local function clickDialogButton(textMatch)
-    -- find a visible TextButton in PlayerGui that contains textMatch
     for _, g in ipairs(PlayerGui:GetDescendants()) do
         if g:IsA("TextButton") and g.Visible then
             local t = (g.Text or ""):lower()
             if t:find(textMatch:lower(), 1, true) then
-                pcall(function()
-                    -- two methods: GuiButton:Activate (RBXScriptSignal) + manual click event
-                    g.MouseButton1Click:Fire()
-                end)
+                pcall(function() g.MouseButton1Click:Fire() end)
                 return true
             end
         end
@@ -139,7 +178,6 @@ local function sellInventoryViaNPC()
        if hrp and myHRP and (hrp.Position - myHRP.Position).Magnitude < 8 then needTP = false end
     end
     if needTP then teleportToSteven(); task.wait(0.4) end
-
     talkToSteven(); task.wait(0.5)
     local ok = clickDialogButton("Sell Inventory")
     task.wait(0.3)
@@ -155,7 +193,6 @@ local function sellOneTool(tool)
        if hrp and myHRP and (hrp.Position - myHRP.Position).Magnitude < 8 then needTP = false end
     end
     if needTP then teleportToSteven(); task.wait(0.4) end
-
     equipTool(tool); task.wait(0.3)
     talkToSteven(); task.wait(0.5)
     local ok = clickDialogButton("Sell This")
@@ -182,7 +219,7 @@ mk("UIStroke",{ Color=Color3.fromRGB(80,180,110), Thickness=1.5, Transparency=0.
 local Bar = mk("Frame",{ Size=UDim2.new(1,0,0,36), BackgroundColor3=Color3.fromRGB(28,38,30), BorderSizePixel=0, Parent=Main })
 mk("UICorner",{ CornerRadius=UDim.new(0,10), Parent=Bar })
 mk("TextLabel",{ Size=UDim2.new(1,-70,1,0), Position=UDim2.new(0,12,0,0), BackgroundTransparency=1,
-    Text="GAG2 Auto-Sell  v3", Font=Enum.Font.GothamBold, TextSize=16,
+    Text="GAG2 Auto-Sell  v4", Font=Enum.Font.GothamBold, TextSize=16,
     TextColor3=Color3.fromRGB(170,230,180), TextXAlignment=Enum.TextXAlignment.Left, Parent=Bar })
 local Close = mk("TextButton",{ Size=UDim2.new(0,30,0,28), Position=UDim2.new(1,-36,0,4),
     BackgroundColor3=Color3.fromRGB(180,60,60), Text="X", Font=Enum.Font.GothamBold, TextSize=14,
@@ -281,16 +318,20 @@ refresh = function()
     end
     local items=scanTools(CurrentTab)
     local seen={}
+    local shown=0
     for _,it in ipairs(items) do
         local k=it.name.."|"..it.rarity
-        if not seen[k] then seen[k]=true; row(it) end
+        if not seen[k] then seen[k]=true; row(it); shown=shown+1 end
     end
     List.CanvasSize=UDim2.new(0,0,0,layout.AbsoluteContentSize.Y+12)
-    if next(seen)==nil then
+    if shown==0 then
         mk("TextLabel",{ Size=UDim2.new(1,-12,0,60), BackgroundTransparency=1,
-            Text="No "..CurrentTab:lower().." found as tools. Use 'Sell ALL' to sell entire inventory via Steven.",
+            Text="No "..CurrentTab:lower().." found in Backpack/Character or PlayerGui inventory. Equip them or use 'Sell ALL' to sell entire inventory via Steven.",
             Font=Enum.Font.Gotham, TextSize=13, TextColor3=Color3.fromRGB(180,180,180),
             TextWrapped=true, Parent=List })
+        setStatus(("Scanned: 0 %s found"):format(CurrentTab:lower()), false)
+    else
+        setStatus(("Found %d %s (tap row to select)"):format(shown, CurrentTab:lower()), true)
     end
 end
 
@@ -364,4 +405,4 @@ do
 end
 
 setTab("Pets"); refresh()
-print("[GAG2 Auto-Sell v3] Loaded. Steven prompt:", getSellPrompt() and "OK" or "MISSING")
+print("[GAG2 Auto-Sell v4] Loaded. Steven prompt:", getSellPrompt() and "OK" or "MISSING")
