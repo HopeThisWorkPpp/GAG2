@@ -86,7 +86,7 @@ local function scanGrouped(category)
 	local out={}; for _,n in ipairs(order) do table.insert(out,groups[n]) end; return out
 end
 
--- ============ Sell-NPC helpers (unchanged from your working v8) ============
+-- ============ Sell-NPC helpers ============
 local function getSellPrompt()
 	local npcs = Workspace:FindFirstChild("NPCS") or Workspace:FindFirstChild("NPCs"); if not npcs then return nil end
 	local steven = npcs:FindFirstChild(CFG.NPCName); if not steven then return nil end
@@ -106,17 +106,27 @@ local function returnHome()
 end
 local function talkToSteven() local p=getSellPrompt(); if not p then return false end; return (pcall(function() fireproximityprompt(p) end)) end
 local function equipTool(tool) local hum=LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid"); if hum then pcall(function() hum:EquipTool(tool) end) end end
+
+local GuiService = game:GetService("GuiService")
 local function clickBtn(btn)
 	if not btn or not btn.Parent then return false end
-	local p,sz=btn.AbsolutePosition,btn.AbsoluteSize
-	local cx,cy=math.floor(p.X+sz.X*0.5),math.floor(p.Y+sz.Y*0.5)
-	pcall(function() VirtualInputManager:SendMouseButtonEvent(cx,cy,0,true,game,0); VirtualInputManager:SendMouseButtonEvent(cx,cy,0,false,game,0) end)
-	pcall(function() VirtualInputManager:SendTouchEvent(1,1,cx,cy); VirtualInputManager:SendTouchEvent(1,2,cx,cy); VirtualInputManager:SendTouchEvent(1,3,cx,cy) end)
+	-- 1) Signal-based clicks first (bypass any overlay GUI on top of the target)
+	pcall(function() if firesignal then firesignal(btn.MouseButton1Down) end end)
+	pcall(function() if firesignal then firesignal(btn.MouseButton1Up) end end)
 	pcall(function() if firesignal then firesignal(btn.MouseButton1Click) end end)
 	pcall(function() if firesignal then firesignal(btn.Activated) end end)
-	pcall(function() btn.MouseButton1Click:Fire() end)
+	-- 2) Virtual mouse/touch fallback WITH GuiInset compensation
+	local p,sz=btn.AbsolutePosition,btn.AbsoluteSize
+	local insetY=0
+	pcall(function() insetY = GuiService:GetGuiInset().Y end)
+	local sg = btn:FindFirstAncestorOfClass("ScreenGui")
+	if sg and sg.IgnoreGuiInset then insetY = 0 end
+	local cx,cy=math.floor(p.X+sz.X*0.5),math.floor(p.Y+sz.Y*0.5+insetY)
+	pcall(function() VirtualInputManager:SendMouseButtonEvent(cx,cy,0,true,game,0); task.wait(0.02); VirtualInputManager:SendMouseButtonEvent(cx,cy,0,false,game,0) end)
+	pcall(function() VirtualInputManager:SendTouchEvent(1,1,cx,cy); task.wait(0.02); VirtualInputManager:SendTouchEvent(1,2,cx,cy); VirtualInputManager:SendTouchEvent(1,3,cx,cy) end)
 	return true
 end
+
 local function findBillboardOpt(needle)
 	needle=needle:lower()
 	local roots={PlayerGui}; pcall(function() table.insert(roots,CoreGui) end)
@@ -144,11 +154,12 @@ local function sellInvViaNPC()
 	for _=1,2 do clickBtn(b); task.wait(0.02) end; task.wait(0.1); return true
 end
 
--- ============ Mailbox helpers (live read from MailboxUI) ============
+-- ============ Mailbox helpers ============
 local INV_PREFIX = { Seeds="Inv_Seeds:", Pets="Inv_Pets:", Crates="Inv_Crates:" }
 local GEAR_PREFIXES = { "Inv_Mushrooms:", "Inv_Sprinklers:", "Inv_WateringCans:" }
 
 local Mail = { ui=nil, sendingFrame=nil, itemSendFrame=nil, inventoryFrame=nil, recipientLocked=false, recipient="" }
+local Gui -- forward declaration; assigned in GUI section below
 
 local function findMailboxPrompt()
 	local gardens = Workspace:FindFirstChild("Gardens")
@@ -177,9 +188,7 @@ local function findMailboxPrompt()
 end
 
 local function openMailbox()
-	-- if already open and valid, reuse
 	if Mail.ui and Mail.ui.Parent then return Mail.ui end
-	-- close stale
 	local old=PlayerGui:FindFirstChild("MailboxUI")
 	if old then
 		local c=old:FindFirstChild("CloseButton",true)
@@ -231,12 +240,10 @@ local function pickRecipient(username)
 end
 
 local function readInventory()
-	-- returns { Seeds={{name,frame,count},...}, Pets={...}, Crates={...}, Gears={...} }
 	local out = { Seeds={}, Pets={}, Crates={}, Gears={} }
 	if not Mail.inventoryFrame or not Mail.inventoryFrame.Parent then return out end
 
 	local function readCount(itemFrame)
-		-- Look for a Count/Amount label, fall back to nil (unknown)
 		local lbl = itemFrame:FindFirstChild("Count",true) or itemFrame:FindFirstChild("Amount",true)
 		if lbl and lbl:IsA("TextLabel") then
 			local n = tonumber(lbl.Text:match("%d+"))
@@ -268,37 +275,63 @@ end
 
 local function clickInventoryItem(itemFrame)
 	if not itemFrame or not itemFrame.Parent then return false end
-	local inner = itemFrame:FindFirstChildWhichIsA("Frame") or itemFrame
-	local b = inner:FindFirstChildWhichIsA("GuiButton")
-	if not b then for _,d in ipairs(itemFrame:GetDescendants()) do if d:IsA("GuiButton") then b=d; break end end end
-	if b then clickBtn(b); return true end
-	return false
+	-- Find the best GuiButton inside the item (scored by name + size)
+	local candidates = {}
+	for _,d in ipairs(itemFrame:GetDescendants()) do
+		if d:IsA("GuiButton") and d.Visible and d.AbsoluteSize.X > 0 and d.AbsoluteSize.Y > 0 then
+			table.insert(candidates, d)
+		end
+	end
+	if #candidates == 0 then
+		if itemFrame:IsA("GuiButton") then clickBtn(itemFrame); return true end
+		return false
+	end
+	local function score(b)
+		local n = tostring(b.Name):lower()
+		if n == "button" or n == "itembutton" or n == "addbutton" or n == "selectbutton" then return 100 end
+		if n:find("add") or n:find("select") or n:find("mail") then return 80 end
+		if n:find("button") then return 60 end
+		return math.floor(b.AbsoluteSize.X * b.AbsoluteSize.Y / 100)
+	end
+	table.sort(candidates, function(a,b) return score(a) > score(b) end)
+	clickBtn(candidates[1])
+	return true
 end
 
 local function sendMailPlan(plan)
-	-- plan: { {entry, count}, ... }
 	if not Mail.inventoryFrame then return false,"Mailbox not connected" end
 	local total,clicked = 0,0
 	for _,p in ipairs(plan) do total = total + p.count end
 	if total==0 then return false,"Pick at least one amount > 0" end
+	-- Hide our overlay so the virtual mouse click reaches MailboxUI underneath
+	local prevEnabled = Gui.Enabled
+	Gui.Enabled = false
+	task.wait(0.05)
 	for _,p in ipairs(plan) do
 		for i=1,p.count do
 			if not p.entry.frame.Parent then break end
 			if not clickInventoryItem(p.entry.frame) then break end
 			clicked = clicked + 1
-			if i % 50 == 0 then task.wait() end
+			task.wait(0.06)
 		end
 	end
 	task.wait(0.4)
 	local sendBtn = Mail.itemSendFrame:FindFirstChild("SendButton",true)
-	if sendBtn and sendBtn:IsA("GuiButton") then clickBtn(sendBtn) else return false,"SendButton missing" end
+	if sendBtn and sendBtn:IsA("GuiButton") then
+		clickBtn(sendBtn)
+	else
+		Gui.Enabled = prevEnabled
+		return false,"SendButton missing"
+	end
+	task.wait(0.25)
+	Gui.Enabled = prevEnabled
 	return true, ("Sent %d clicks to %s"):format(clicked, Mail.recipient)
 end
 
 -- ============ GUI ============
 local old=(CoreGui:FindFirstChild("GAG2AS")) or (PlayerGui:FindFirstChild("GAG2AS")); if old then old:Destroy() end
 local parent=CoreGui; if not pcall(function() return CoreGui.Name end) then parent=PlayerGui end
-local Gui=Instance.new("ScreenGui"); Gui.Name="GAG2AS"; Gui.ResetOnSpawn=false; Gui.IgnoreGuiInset=true; Gui.Parent=parent
+Gui=Instance.new("ScreenGui"); Gui.Name="GAG2AS"; Gui.ResetOnSpawn=false; Gui.IgnoreGuiInset=true; Gui.Parent=parent
 local function mk(c,p) local i=Instance.new(c); for k,v in pairs(p) do i[k]=v end; return i end
 
 local TH={ bg=Color3.fromRGB(16,22,19),panel=Color3.fromRGB(22,30,25),row=Color3.fromRGB(28,38,32),
@@ -319,7 +352,7 @@ mk("UIListLayout",{Padding=UDim.new(0,8),SortOrder=Enum.SortOrder.LayoutOrder,Pa
 local Bar=mk("Frame",{Size=UDim2.new(1,0,0,46),LayoutOrder=1,BackgroundColor3=TH.panel,BorderSizePixel=0,Parent=Main})
 mk("UICorner",{CornerRadius=UDim.new(0,10),Parent=Bar}); mk("UIStroke",{Color=TH.stroke,Thickness=1,Transparency=0.6,Parent=Bar})
 mk("TextLabel",{Size=UDim2.new(1,-100,1,0),Position=UDim2.new(0,14,0,0),BackgroundTransparency=1,
-	Text="GAG2 Auto Suite  v9",Font=Enum.Font.GothamBlack,TextSize=17,TextColor3=TH.text,
+	Text="GAG2 Auto Suite  v9.1",Font=Enum.Font.GothamBlack,TextSize=17,TextColor3=TH.text,
 	TextXAlignment=Enum.TextXAlignment.Left,Parent=Bar})
 local Mini=mk("TextButton",{Size=UDim2.new(0,38,0,34),Position=UDim2.new(1,-86,0.5,-17),BackgroundColor3=Color3.fromRGB(70,110,80),Text="—",Font=Enum.Font.GothamBold,TextSize=18,TextColor3=TH.text,Parent=Bar})
 mk("UICorner",{CornerRadius=UDim.new(0,8),Parent=Mini})
@@ -335,7 +368,6 @@ local function mkTab(label,order)
 end
 local PetsTab=mkTab("Pets",1); local SeedsTab=mkTab("Seeds",2); local MailTab=mkTab("Mail",3)
 
--- ===== Mail header =====
 local MailHeader=mk("Frame",{Size=UDim2.new(1,0,0,118),LayoutOrder=3,BackgroundColor3=TH.panel,BorderSizePixel=0,Parent=Main,Visible=false})
 mk("UICorner",{CornerRadius=UDim.new(0,10),Parent=MailHeader})
 mk("UIStroke",{Color=TH.mail,Thickness=1,Transparency=0.5,Parent=MailHeader})
@@ -365,14 +397,12 @@ local function mkSub(label,order)
 end
 local SeedsBtn=mkSub("Seeds",1); local PetsBtn=mkSub("Pets",2); local CratesBtn=mkSub("Crates",3); local GearsBtn=mkSub("Gears",4)
 
--- ===== List =====
 local List=mk("ScrollingFrame",{Size=UDim2.new(1,0,1,-200),LayoutOrder=4,BackgroundColor3=TH.panel,
 	BorderSizePixel=0,CanvasSize=UDim2.new(0,0,0,0),ScrollBarThickness=6,ScrollBarImageColor3=TH.accent,Parent=Main})
 mk("UICorner",{CornerRadius=UDim.new(0,10),Parent=List})
 local ListLayout=mk("UIListLayout",{Padding=UDim.new(0,5),SortOrder=Enum.SortOrder.LayoutOrder,Parent=List})
 mk("UIPadding",{PaddingTop=UDim.new(0,6),PaddingBottom=UDim.new(0,6),PaddingLeft=UDim.new(0,6),PaddingRight=UDim.new(0,6),Parent=List})
 
--- ===== Bottom controls =====
 local Bot=mk("Frame",{Size=UDim2.new(1,0,0,120),LayoutOrder=5,BackgroundTransparency=1,Parent=Main})
 local function mkAct(p) local b=mk("TextButton",p); mk("UICorner",{CornerRadius=UDim.new(0,8),Parent=b}); return b end
 local SellSel=mkAct({Size=UDim2.new(0.5,-4,0,42),Position=UDim2.new(0,0,0,0),BackgroundColor3=TH.accentDim,Text="Sell Selected",Font=Enum.Font.GothamBold,TextSize=14,TextColor3=TH.text,Parent=Bot})
@@ -387,7 +417,6 @@ local function setMailMsg(t,ok) MailStatus.Text=t; MailStatus.TextColor3=(ok==fa
 
 local refresh
 
--- ===== Row builders =====
 local function buildSellRow(group)
 	local key=group.name; local color=RARITY_COLOR[group.rarity] or RARITY_COLOR.Other
 	local r=mk("Frame",{Size=UDim2.new(1,-8,0,46),BackgroundColor3=TH.row,BorderSizePixel=0,Parent=List})
@@ -641,4 +670,4 @@ do local drag,start,sp
 end
 
 setTab("Pets")
-print("[GAG2 v9] Loaded.  Steven:",getSellPrompt() and "OK" or "MISSING","Mailbox:",findMailboxPrompt() and "OK" or "MISSING")
+print("[GAG2 v9.1] Loaded.  Steven:",getSellPrompt() and "OK" or "MISSING","Mailbox:",findMailboxPrompt() and "OK" or "MISSING")
