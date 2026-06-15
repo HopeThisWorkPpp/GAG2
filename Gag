@@ -1,38 +1,38 @@
-Action: file_editor create /app/gag.lua --file-text "local Players = game:GetService(\"Players\")
-local UserInputService = game:GetService(\"UserInputService\")
-local VirtualInputManager = game:GetService(\"VirtualInputManager\")
-local CoreGui = game:GetService(\"CoreGui\")
-local Workspace = game:GetService(\"Workspace\")
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local CoreGui = game:GetService("CoreGui")
+local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild(\"PlayerGui\")
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
-local CFG = { NPCName = \"Steven\", TeleportBack = true }
-local CurrentTab = \"Pets\"
+local CFG = { NPCName = "Steven", TeleportBack = true }
+local CurrentTab = "Pets"
 local SelectedQty = { Pets = {}, Seeds = {} }
 
--- Grow a Garden 2 pets (verified against growagarden2wiki.com)
+-- Grow a Garden 2 pets
 local PET_RARITY = {
-	[\"Frog\"]=\"Common\", [\"Bunny\"]=\"Common\",
-	[\"Owl\"]=\"Uncommon\",
-	[\"Deer\"]=\"Rare\",
-	[\"Robin\"]=\"Legendary\", [\"Bee\"]=\"Legendary\",
-	[\"Monkey\"]=\"Mythic\", [\"Golden Dragonfly\"]=\"Mythic\", [\"Unicorn\"]=\"Mythic\",
-	[\"Raccoon\"]=\"Super\", [\"Ice Serpent\"]=\"Super\", [\"Black Dragon\"]=\"Super\",
+	["Frog"]="Common", ["Bunny"]="Common",
+	["Owl"]="Uncommon",
+	["Deer"]="Rare",
+	["Robin"]="Legendary", ["Bee"]="Legendary",
+	["Monkey"]="Mythic", ["Golden Dragonfly"]="Mythic", ["Unicorn"]="Mythic",
+	["Raccoon"]="Super", ["Ice Serpent"]="Super", ["Black Dragon"]="Super",
 }
 
--- Grow a Garden 2 seeds (verified against growagarden2wiki.net)
+-- Grow a Garden 2 seeds
 local SEED_RARITY = {
-	[\"Carrot\"]=\"Common\", [\"Blueberry\"]=\"Common\", [\"Strawberry\"]=\"Common\",
-	[\"Apple\"]=\"Uncommon\", [\"Pumpkin\"]=\"Uncommon\", [\"Tomato\"]=\"Uncommon\", [\"Tulip\"]=\"Uncommon\",
-	[\"Bamboo\"]=\"Rare\", [\"Cactus\"]=\"Rare\", [\"Corn\"]=\"Rare\", [\"Pineapple\"]=\"Rare\",
-	[\"Banana\"]=\"Epic\", [\"Coconut\"]=\"Epic\", [\"Grape\"]=\"Epic\", [\"Green Bean\"]=\"Epic\",
-	[\"Mango\"]=\"Epic\", [\"Mushroom\"]=\"Epic\",
-	[\"Acorn\"]=\"Legendary\", [\"Cherry\"]=\"Legendary\", [\"Dragon Fruit\"]=\"Legendary\",
-	[\"Sunflower\"]=\"Legendary\",
-	[\"Beanstalk\"]=\"Mythic\", [\"Lotus\"]=\"Mythic\", [\"Poison Apple\"]=\"Mythic\",
-	[\"Pomegranate\"]=\"Mythic\", [\"Venus Flytrap\"]=\"Mythic\", [\"Venus Fly Trap\"]=\"Mythic\",
-	[\"Moon Bloom\"]=\"Super\", [\"Dragon's Breath\"]=\"Super\", [\"Dragons Breath\"]=\"Super\",
-	[\"Thorn Rose\"]=\"Super\",
+	["Carrot"]="Common", ["Blueberry"]="Common", ["Strawberry"]="Common",
+	["Apple"]="Uncommon", ["Pumpkin"]="Uncommon", ["Tomato"]="Uncommon", ["Tulip"]="Uncommon",
+	["Bamboo"]="Rare", ["Cactus"]="Rare", ["Corn"]="Rare", ["Pineapple"]="Rare",
+	["Banana"]="Epic", ["Coconut"]="Epic", ["Grape"]="Epic", ["Green Bean"]="Epic",
+	["Mango"]="Epic", ["Mushroom"]="Epic",
+	["Acorn"]="Legendary", ["Cherry"]="Legendary", ["Dragon Fruit"]="Legendary",
+	["Sunflower"]="Legendary",
+	["Beanstalk"]="Mythic", ["Lotus"]="Mythic", ["Poison Apple"]="Mythic",
+	["Pomegranate"]="Mythic", ["Venus Flytrap"]="Mythic", ["Venus Fly Trap"]="Mythic",
+	["Moon Bloom"]="Super", ["Dragon's Breath"]="Super", ["Dragons Breath"]="Super",
+	["Thorn Rose"]="Super",
 }
 
 local RARITY_COLOR = {
@@ -46,7 +46,7 @@ local RARITY_COLOR = {
 }
 
 local function normalizeName(s)
-	return (tostring(s or \"\"):lower():gsub(\"[%s_%-:'%.]\", \"\"))
+	return (tostring(s or ""):lower():gsub("[%s_%-:'%.]", ""))
 end
 
 local PET_LOOKUP, SEED_LOOKUP = {}, {}
@@ -54,10 +54,10 @@ for k in pairs(PET_RARITY) do PET_LOOKUP[normalizeName(k)] = k end
 for k in pairs(SEED_RARITY) do SEED_LOOKUP[normalizeName(k)] = k end
 
 local function stripInvPrefix(name)
-	local s = tostring(name or \"\")
-	for _, p in ipairs({\"^Inv_Pets:\", \"^Inv_Seeds:\", \"^Inv_Crates:\",
-		\"^Inv_Mushrooms:\", \"^Inv_Sprinklers:\", \"^Inv_WateringCans:\"}) do
-		s = s:gsub(p, \"\")
+	local s = tostring(name or "")
+	for _, p in ipairs({"^Inv_Pets:", "^Inv_Seeds:", "^Inv_Crates:",
+		"^Inv_Mushrooms:", "^Inv_Sprinklers:", "^Inv_WateringCans:"}) do
+		s = s:gsub(p, "")
 	end
 	return s
 end
@@ -65,50 +65,50 @@ end
 local function resolveItemName(tool)
 	local clean = stripInvPrefix(tool.Name)
 	local key = normalizeName(clean)
-	if PET_LOOKUP[key] then return PET_LOOKUP[key], \"Pets\" end
-	if SEED_LOOKUP[key] then return SEED_LOOKUP[key], \"Seeds\" end
+	if PET_LOOKUP[key] then return PET_LOOKUP[key], "Pets" end
+	if SEED_LOOKUP[key] then return SEED_LOOKUP[key], "Seeds" end
 
 	local ok, attrs = pcall(function() return tool:GetAttributes() end)
-	if ok and type(attrs) == \"table\" then
+	if ok and type(attrs) == "table" then
 		for _, v in pairs(attrs) do
-			if type(v) == \"string\" and v ~= \"\" then
+			if type(v) == "string" and v ~= "" then
 				local vk = normalizeName(stripInvPrefix(v))
-				if PET_LOOKUP[vk] then return PET_LOOKUP[vk], \"Pets\" end
-				if SEED_LOOKUP[vk] then return SEED_LOOKUP[vk], \"Seeds\" end
+				if PET_LOOKUP[vk] then return PET_LOOKUP[vk], "Pets" end
+				if SEED_LOOKUP[vk] then return SEED_LOOKUP[vk], "Seeds" end
 			end
 		end
 	end
 
 	for _, c in ipairs(tool:GetChildren()) do
-		if c:IsA(\"StringValue\") then
+		if c:IsA("StringValue") then
 			local vk = normalizeName(stripInvPrefix(c.Value))
-			if PET_LOOKUP[vk] then return PET_LOOKUP[vk], \"Pets\" end
-			if SEED_LOOKUP[vk] then return SEED_LOOKUP[vk], \"Seeds\" end
+			if PET_LOOKUP[vk] then return PET_LOOKUP[vk], "Pets" end
+			if SEED_LOOKUP[vk] then return SEED_LOOKUP[vk], "Seeds" end
 		end
 		local cnk = normalizeName(stripInvPrefix(c.Name))
-		if PET_LOOKUP[cnk] then return PET_LOOKUP[cnk], \"Pets\" end
-		if SEED_LOOKUP[cnk] then return SEED_LOOKUP[cnk], \"Seeds\" end
+		if PET_LOOKUP[cnk] then return PET_LOOKUP[cnk], "Pets" end
+		if SEED_LOOKUP[cnk] then return SEED_LOOKUP[cnk], "Seeds" end
 	end
 
-	local cat = tostring(tool:GetAttribute(\"Category\") or tool:GetAttribute(\"Type\") or \"\"):lower()
-	if cat:find(\"pet\") then return clean, \"Pets\" end
-	if cat:find(\"seed\") then return clean, \"Seeds\" end
+	local cat = tostring(tool:GetAttribute("Category") or tool:GetAttribute("Type") or ""):lower()
+	if cat:find("pet") then return clean, "Pets" end
+	if cat:find("seed") then return clean, "Seeds" end
 
 	return nil, nil
 end
 
 local function scanGrouped(category)
 	local groups, order = {}, {}
-	local sources = { LocalPlayer:FindFirstChild(\"Backpack\"), LocalPlayer.Character }
+	local sources = { LocalPlayer:FindFirstChild("Backpack"), LocalPlayer.Character }
 	for _, src in ipairs(sources) do
 		if src then
 			for _, t in ipairs(src:GetChildren()) do
-				if t:IsA(\"Tool\") then
+				if t:IsA("Tool") then
 					local name, cat = resolveItemName(t)
 					if name and cat == category then
-						local rarity = (category == \"Pets\" and PET_RARITY[name])
-							or (category == \"Seeds\" and SEED_RARITY[name])
-							or tostring(t:GetAttribute(\"Rarity\") or \"Common\")
+						local rarity = (category == "Pets" and PET_RARITY[name])
+							or (category == "Seeds" and SEED_RARITY[name])
+							or tostring(t:GetAttribute("Rarity") or "Common")
 						local g = groups[name]
 						if not g then
 							g = { name = name, rarity = rarity, count = 0, tools = {} }
@@ -134,7 +134,7 @@ local function scanGrouped(category)
 end
 
 local function getStevenModel()
-	local npcs = Workspace:FindFirstChild(\"NPCS\") or Workspace:FindFirstChild(\"NPCs\")
+	local npcs = Workspace:FindFirstChild("NPCS") or Workspace:FindFirstChild("NPCs")
 	if not npcs then return nil end
 	return npcs:FindFirstChild(CFG.NPCName)
 end
@@ -142,20 +142,19 @@ end
 local function getSellPrompt()
 	local steven = getStevenModel()
 	if not steven then return nil end
-	local hrp = steven:FindFirstChild(\"HumanoidRootPart\") or steven.PrimaryPart
+	local hrp = steven:FindFirstChild("HumanoidRootPart") or steven.PrimaryPart
 	if not hrp then return nil end
-	return hrp:FindFirstChildOfClass(\"ProximityPrompt\"), hrp
+	return hrp:FindFirstChildOfClass("ProximityPrompt"), hrp
 end
 
 local function findDialogInModel(model)
 	if not model then return nil end
 	for _, d in ipairs(model:GetDescendants()) do
-		if d:IsA(\"Dialog\") then return d end
+		if d:IsA("Dialog") then return d end
 	end
 	return nil
 end
 
--- Try to select a DialogChoice via Roblox's built-in Dialog system
 local function selectDialogChoiceByText(needle)
 	local steven = getStevenModel()
 	local dialog = findDialogInModel(steven)
@@ -163,8 +162,8 @@ local function selectDialogChoiceByText(needle)
 	needle = tostring(needle):lower()
 	local target
 	for _, c in ipairs(dialog:GetChildren()) do
-		if c:IsA(\"DialogChoice\") then
-			local ud = tostring(c.UserDialog or \"\"):lower()
+		if c:IsA("DialogChoice") then
+			local ud = tostring(c.UserDialog or ""):lower()
 			if ud:find(needle, 1, true) then target = c; break end
 		end
 	end
@@ -198,27 +197,25 @@ end
 local function isAncestorVisible(g)
 	local p = g
 	while p and p ~= PlayerGui do
-		if p:IsA(\"GuiObject\") and p.Visible == false then return false end
+		if p:IsA("GuiObject") and p.Visible == false then return false end
 		p = p.Parent
 	end
 	return true
 end
 
--- Find a dialog button whose visible text contains ALL needles in `must`
--- AND does NOT contain any string in `mustNot`
 local function findDialogButtonStrict(must, mustNot)
 	mustNot = mustNot or {}
 	for _, g in ipairs(PlayerGui:GetDescendants()) do
-		if g:IsA(\"GuiButton\") and g.Visible and isAncestorVisible(g) then
+		if g:IsA("GuiButton") and g.Visible and isAncestorVisible(g) then
 			local full = g:GetFullName():lower()
-			if not full:find(\"template\") then
-				local txt = \"\"
-				if g:IsA(\"TextButton\") then txt = (g.Text or \"\") end
-				if txt == \"\" then
+			if not full:find("template") then
+				local txt = ""
+				if g:IsA("TextButton") then txt = (g.Text or "") end
+				if txt == "" then
 					for _, d in ipairs(g:GetDescendants()) do
-						if d:IsA(\"TextLabel\") and d.Visible then
-							txt = (d.Text or \"\")
-							if txt ~= \"\" then break end
+						if d:IsA("TextLabel") and d.Visible then
+							txt = (d.Text or "")
+							if txt ~= "" then break end
 						end
 					end
 				end
@@ -250,12 +247,11 @@ local function waitForStrict(must, mustNot, timeout)
 	return nil
 end
 
--- Press keyboard \"2\" via VirtualInputManager (fallback for #2 dialog choice)
-local function pressKey2()
+local function pressKey(keyCode)
 	pcall(function()
-		VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Two, false, game)
+		VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
 		task.wait(0.05)
-		VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Two, false, game)
+		VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
 	end)
 end
 
@@ -264,7 +260,7 @@ local function teleportToSteven()
 	local _, hrp = getSellPrompt()
 	if not hrp then return false end
 	local char = LocalPlayer.Character
-	local myHRP = char and char:FindFirstChild(\"HumanoidRootPart\")
+	local myHRP = char and char:FindFirstChild("HumanoidRootPart")
 	if not myHRP then return false end
 	origCFrame = myHRP.CFrame
 	myHRP.CFrame = hrp.CFrame * CFrame.new(0, 0, 4)
@@ -273,7 +269,7 @@ end
 local function returnHome()
 	if not origCFrame then return end
 	local char = LocalPlayer.Character
-	local myHRP = char and char:FindFirstChild(\"HumanoidRootPart\")
+	local myHRP = char and char:FindFirstChild("HumanoidRootPart")
 	if myHRP then myHRP.CFrame = origCFrame end
 	origCFrame = nil
 end
@@ -284,18 +280,16 @@ local function talkToSteven()
 end
 local function equipTool(tool)
 	local char = LocalPlayer.Character
-	local hum = char and char:FindFirstChildOfClass(\"Humanoid\")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
 	if hum then pcall(function() hum:EquipTool(tool) end) end
 end
 
--- Always select option #2 \"Sell This!\" from Steven's dialog
+-- Always pick option #2 "Sell This!" from Steven's dialog
 local function pickSellThis()
-	-- 1) Direct Dialog API
-	if selectDialogChoiceByText(\"sell this\") then return true end
-	-- 2) Strict GUI search: must contain \"sell this\", must NOT match inventory/all/worth/bargain/nevermind
+	if selectDialogChoiceByText("sell this") then return true end
 	local btn = waitForStrict(
-		{ \"sell this\" },
-		{ \"sell inventory\", \"sell all\", \"how much\", \"bargain\", \"nevermind\" },
+		{ "sell this" },
+		{ "sell inventory", "sell all", "how much", "bargain", "nevermind" },
 		1.5
 	)
 	if btn then
@@ -305,8 +299,7 @@ local function pickSellThis()
 		end
 		return true
 	end
-	-- 3) Keyboard \"2\" fallback
-	pressKey2(); task.wait(0.15); pressKey2()
+	pressKey(Enum.KeyCode.Two); task.wait(0.15); pressKey(Enum.KeyCode.Two)
 	return true
 end
 
@@ -321,19 +314,12 @@ end
 
 local function sellInventoryViaNPC()
 	talkToSteven(); task.wait(0.15)
-	-- Try Dialog API first
-	if selectDialogChoiceByText(\"sell inventory\") then
+	if selectDialogChoiceByText("sell inventory") then
 		task.wait(0.3); return true
 	end
-	local btn = waitForStrict({ \"sell inventory\" }, { \"sell this\" }, 2)
+	local btn = waitForStrict({ "sell inventory" }, { "sell this" }, 2)
 	if not btn then
-		-- Keypress \"1\"
-		pcall(function()
-			VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.One, false, game)
-			task.wait(0.05)
-			VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.One, false, game)
-		end)
-		task.wait(0.3)
+		pressKey(Enum.KeyCode.One); task.wait(0.3)
 		return true
 	end
 	for _ = 1, 2 do clickBtn(btn); task.wait(0.15) end
@@ -341,107 +327,107 @@ local function sellInventoryViaNPC()
 	return true
 end
 
-local old = (CoreGui:FindFirstChild(\"GAG2AS\")) or (PlayerGui:FindFirstChild(\"GAG2AS\"))
+local old = (CoreGui:FindFirstChild("GAG2AS")) or (PlayerGui:FindFirstChild("GAG2AS"))
 if old then old:Destroy() end
 local parent = CoreGui
 if not pcall(function() return CoreGui.Name end) then parent = PlayerGui end
 
-local Gui = Instance.new(\"ScreenGui\")
-Gui.Name = \"GAG2AS\"; Gui.ResetOnSpawn = false; Gui.IgnoreGuiInset = true; Gui.Parent = parent
+local Gui = Instance.new("ScreenGui")
+Gui.Name = "GAG2AS"; Gui.ResetOnSpawn = false; Gui.IgnoreGuiInset = true; Gui.Parent = parent
 
 local function mk(c, p) local i = Instance.new(c); for k, v in pairs(p) do i[k] = v end; return i end
 
-local Main = mk(\"Frame\", {
+local Main = mk("Frame", {
 	AnchorPoint = Vector2.new(0.5, 0.5),
 	Position = UDim2.new(0.5, 0, 0.5, 0),
 	Size = UDim2.new(0.92, 0, 0.85, 0),
 	BackgroundColor3 = Color3.fromRGB(22, 28, 24),
 	BorderSizePixel = 0, Parent = Gui, Active = true,
 })
-mk(\"UISizeConstraint\", { MaxSize = Vector2.new(480, 720), MinSize = Vector2.new(280, 360), Parent = Main })
-mk(\"UICorner\", { CornerRadius = UDim.new(0, 12), Parent = Main })
-mk(\"UIStroke\", { Color = Color3.fromRGB(80,180,110), Thickness = 1.5, Transparency = 0.4, Parent = Main })
-mk(\"UIPadding\", { PaddingTop = UDim.new(0,8), PaddingBottom = UDim.new(0,8),
+mk("UISizeConstraint", { MaxSize = Vector2.new(480, 720), MinSize = Vector2.new(280, 360), Parent = Main })
+mk("UICorner", { CornerRadius = UDim.new(0, 12), Parent = Main })
+mk("UIStroke", { Color = Color3.fromRGB(80,180,110), Thickness = 1.5, Transparency = 0.4, Parent = Main })
+mk("UIPadding", { PaddingTop = UDim.new(0,8), PaddingBottom = UDim.new(0,8),
 	PaddingLeft = UDim.new(0,8), PaddingRight = UDim.new(0,8), Parent = Main })
-mk(\"UIListLayout\", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 6),
+mk("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 6),
 	SortOrder = Enum.SortOrder.LayoutOrder, Parent = Main })
 
-local Bar = mk(\"Frame\", { Size = UDim2.new(1, 0, 0, 40), LayoutOrder = 1,
+local Bar = mk("Frame", { Size = UDim2.new(1, 0, 0, 40), LayoutOrder = 1,
 	BackgroundColor3 = Color3.fromRGB(28,38,30), BorderSizePixel = 0, Parent = Main })
-mk(\"UICorner\", { CornerRadius = UDim.new(0, 8), Parent = Bar })
-mk(\"TextLabel\", { Size = UDim2.new(1, -90, 1, 0), Position = UDim2.new(0, 12, 0, 0),
-	BackgroundTransparency = 1, Text = \"GAG2 Auto-Sell v7\",
+mk("UICorner", { CornerRadius = UDim.new(0, 8), Parent = Bar })
+mk("TextLabel", { Size = UDim2.new(1, -90, 1, 0), Position = UDim2.new(0, 12, 0, 0),
+	BackgroundTransparency = 1, Text = "GAG2 Auto-Sell v7",
 	Font = Enum.Font.GothamBold, TextSize = 17, TextColor3 = Color3.fromRGB(170,230,180),
 	TextXAlignment = Enum.TextXAlignment.Left, Parent = Bar })
 
-local Mini = mk(\"TextButton\", { Size = UDim2.new(0, 36, 0, 32), Position = UDim2.new(1, -82, 0, 4),
-	BackgroundColor3 = Color3.fromRGB(70,110,80), Text = \"—\",
+local Mini = mk("TextButton", { Size = UDim2.new(0, 36, 0, 32), Position = UDim2.new(1, -82, 0, 4),
+	BackgroundColor3 = Color3.fromRGB(70,110,80), Text = "—",
 	Font = Enum.Font.GothamBold, TextSize = 18, TextColor3 = Color3.fromRGB(255,255,255), Parent = Bar })
-mk(\"UICorner\", { CornerRadius = UDim.new(0, 6), Parent = Mini })
+mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = Mini })
 
-local Close = mk(\"TextButton\", { Size = UDim2.new(0, 36, 0, 32), Position = UDim2.new(1, -40, 0, 4),
-	BackgroundColor3 = Color3.fromRGB(180,60,60), Text = \"X\",
+local Close = mk("TextButton", { Size = UDim2.new(0, 36, 0, 32), Position = UDim2.new(1, -40, 0, 4),
+	BackgroundColor3 = Color3.fromRGB(180,60,60), Text = "X",
 	Font = Enum.Font.GothamBold, TextSize = 16, TextColor3 = Color3.fromRGB(255,255,255), Parent = Bar })
-mk(\"UICorner\", { CornerRadius = UDim.new(0, 6), Parent = Close })
+mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = Close })
 
-local Tabs = mk(\"Frame\", { Size = UDim2.new(1, 0, 0, 38), LayoutOrder = 2,
+local Tabs = mk("Frame", { Size = UDim2.new(1, 0, 0, 38), LayoutOrder = 2,
 	BackgroundTransparency = 1, Parent = Main })
 local function mkTab(label, posScale)
-	local b = mk(\"TextButton\", {
+	local b = mk("TextButton", {
 		Size = UDim2.new(0.48, 0, 1, 0), Position = UDim2.new(posScale, 0, 0, 0),
 		BackgroundColor3 = Color3.fromRGB(35,50,38), Text = label,
 		Font = Enum.Font.GothamBold, TextSize = 15,
 		TextColor3 = Color3.fromRGB(220,220,220), Parent = Tabs,
 	})
-	mk(\"UICorner\", { CornerRadius = UDim.new(0, 6), Parent = b }); return b
+	mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = b }); return b
 end
-local PetsTab = mkTab(\"Pets\", 0)
-local SeedsTab = mkTab(\"Seeds\", 0.52)
+local PetsTab = mkTab("Pets", 0)
+local SeedsTab = mkTab("Seeds", 0.52)
 
-local List = mk(\"ScrollingFrame\", {
+local List = mk("ScrollingFrame", {
 	Size = UDim2.new(1, 0, 1, -200), LayoutOrder = 3,
 	BackgroundColor3 = Color3.fromRGB(18,24,20), BorderSizePixel = 0,
 	CanvasSize = UDim2.new(0, 0, 0, 0), ScrollBarThickness = 8,
 	ScrollBarImageColor3 = Color3.fromRGB(80,180,110), Parent = Main,
 })
-mk(\"UICorner\", { CornerRadius = UDim.new(0, 6), Parent = List })
-local ListLayout = mk(\"UIListLayout\", { Padding = UDim.new(0, 4),
+mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = List })
+local ListLayout = mk("UIListLayout", { Padding = UDim.new(0, 4),
 	SortOrder = Enum.SortOrder.LayoutOrder, Parent = List })
-mk(\"UIPadding\", { PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0,6),
+mk("UIPadding", { PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0,6),
 	PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = List })
 
-local Bot = mk(\"Frame\", { Size = UDim2.new(1, 0, 0, 110), LayoutOrder = 4,
+local Bot = mk("Frame", { Size = UDim2.new(1, 0, 0, 110), LayoutOrder = 4,
 	BackgroundTransparency = 1, Parent = Main })
 local function mkBtn(text, sizeScale, posScale, color)
-	local b = mk(\"TextButton\", {
+	local b = mk("TextButton", {
 		Size = UDim2.new(sizeScale, -4, 0, 38),
 		Position = UDim2.new(posScale, 0, 0, 0),
 		BackgroundColor3 = color, Text = text,
 		Font = Enum.Font.GothamBold, TextSize = 14,
 		TextColor3 = Color3.fromRGB(255,255,255), Parent = Bot,
 	})
-	mk(\"UICorner\", { CornerRadius = UDim.new(0, 6), Parent = b }); return b
+	mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = b }); return b
 end
-local SellSel = mkBtn(\"Sell Selected\", 0.5, 0, Color3.fromRGB(60,140,80))
-local SellAll = mkBtn(\"Sell ALL\", 0.5, 0.5, Color3.fromRGB(140,100,50))
-local Refresh = mk(\"TextButton\", { Size = UDim2.new(0.33, -4, 0, 34), Position = UDim2.new(0, 0, 0, 42),
-	BackgroundColor3 = Color3.fromRGB(50,80,130), Text = \"Refresh\",
+local SellSel = mkBtn("Sell Selected", 0.5, 0, Color3.fromRGB(60,140,80))
+local SellAll = mkBtn("Sell ALL", 0.5, 0.5, Color3.fromRGB(140,100,50))
+local Refresh = mk("TextButton", { Size = UDim2.new(0.33, -4, 0, 34), Position = UDim2.new(0, 0, 0, 42),
+	BackgroundColor3 = Color3.fromRGB(50,80,130), Text = "Refresh",
 	Font = Enum.Font.GothamBold, TextSize = 13,
 	TextColor3 = Color3.fromRGB(255,255,255), Parent = Bot })
-mk(\"UICorner\", { CornerRadius = UDim.new(0, 6), Parent = Refresh })
-local TpBack = mk(\"TextButton\", { Size = UDim2.new(0.33, -4, 0, 34), Position = UDim2.new(0.335, 0, 0, 42),
-	BackgroundColor3 = Color3.fromRGB(80,130,110), Text = \"TP-Back: ON\",
+mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = Refresh })
+local TpBack = mk("TextButton", { Size = UDim2.new(0.33, -4, 0, 34), Position = UDim2.new(0.335, 0, 0, 42),
+	BackgroundColor3 = Color3.fromRGB(80,130,110), Text = "TP-Back: ON",
 	Font = Enum.Font.GothamBold, TextSize = 13,
 	TextColor3 = Color3.fromRGB(255,255,255), Parent = Bot })
-mk(\"UICorner\", { CornerRadius = UDim.new(0, 6), Parent = TpBack })
-local SelAllBtn = mk(\"TextButton\", { Size = UDim2.new(0.34, -4, 0, 34), Position = UDim2.new(0.67, 0, 0, 42),
-	BackgroundColor3 = Color3.fromRGB(70,90,70), Text = \"Select All Max\",
+mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = TpBack })
+local SelAllBtn = mk("TextButton", { Size = UDim2.new(0.34, -4, 0, 34), Position = UDim2.new(0.67, 0, 0, 42),
+	BackgroundColor3 = Color3.fromRGB(70,90,70), Text = "Select All Max",
 	Font = Enum.Font.GothamBold, TextSize = 13,
 	TextColor3 = Color3.fromRGB(255,255,255), Parent = Bot })
-mk(\"UICorner\", { CornerRadius = UDim.new(0, 6), Parent = SelAllBtn })
+mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = SelAllBtn })
 
-local Status = mk(\"TextLabel\", { Size = UDim2.new(1, 0, 0, 28), Position = UDim2.new(0, 0, 0, 80),
-	BackgroundTransparency = 1, Text = \"\", Font = Enum.Font.Gotham, TextSize = 13,
+local Status = mk("TextLabel", { Size = UDim2.new(1, 0, 0, 28), Position = UDim2.new(0, 0, 0, 80),
+	BackgroundTransparency = 1, Text = "", Font = Enum.Font.Gotham, TextSize = 13,
 	TextColor3 = Color3.fromRGB(150,200,160), TextXAlignment = Enum.TextXAlignment.Left,
 	TextWrapped = true, Parent = Bot })
 local function setStatus(t, ok)
@@ -453,52 +439,52 @@ local refresh
 
 local function buildRow(group)
 	local key = group.name
-	local rarity = group.rarity or \"Common\"
+	local rarity = group.rarity or "Common"
 	local color = RARITY_COLOR[rarity] or Color3.fromRGB(190,190,190)
 
-	local r = mk(\"Frame\", { Size = UDim2.new(1, -10, 0, 46),
+	local r = mk("Frame", { Size = UDim2.new(1, -10, 0, 46),
 		BackgroundColor3 = Color3.fromRGB(30,40,32), BorderSizePixel = 0, Parent = List })
-	mk(\"UICorner\", { CornerRadius = UDim.new(0, 6), Parent = r })
-	mk(\"UIStroke\", { Color = color, Thickness = 1, Transparency = 0.6, Parent = r })
+	mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = r })
+	mk("UIStroke", { Color = color, Thickness = 1, Transparency = 0.6, Parent = r })
 
-	mk(\"TextLabel\", { Size = UDim2.new(0.45, 0, 1, 0), Position = UDim2.new(0, 10, 0, 0),
-		BackgroundTransparency = 1, Text = (\"%s x%d\"):format(group.name, group.count),
+	mk("TextLabel", { Size = UDim2.new(0.45, 0, 1, 0), Position = UDim2.new(0, 10, 0, 0),
+		BackgroundTransparency = 1, Text = ("%s x%d"):format(group.name, group.count),
 		Font = Enum.Font.GothamBold, TextSize = 14,
 		TextColor3 = Color3.fromRGB(235,235,235),
 		TextXAlignment = Enum.TextXAlignment.Left, Parent = r })
 
-	mk(\"TextLabel\", { Size = UDim2.new(0.2, 0, 0, 18), Position = UDim2.new(0.45, 0, 0.5, -9),
+	mk("TextLabel", { Size = UDim2.new(0.2, 0, 0, 18), Position = UDim2.new(0.45, 0, 0.5, -9),
 		BackgroundTransparency = 1, Text = rarity, Font = Enum.Font.GothamMedium,
 		TextSize = 12, TextColor3 = color,
 		TextXAlignment = Enum.TextXAlignment.Center, Parent = r })
 
 	local qty = SelectedQty[CurrentTab][key] or 0
-	local box = mk(\"TextBox\", {
+	local box = mk("TextBox", {
 		Size = UDim2.new(0, 64, 0, 30), Position = UDim2.new(1, -150, 0.5, -15),
 		BackgroundColor3 = Color3.fromRGB(50,60,52),
-		Text = tostring(qty), PlaceholderText = \"0\",
+		Text = tostring(qty), PlaceholderText = "0",
 		Font = Enum.Font.GothamBold, TextSize = 14,
 		TextColor3 = Color3.fromRGB(255,255,255),
 		ClearTextOnFocus = false, Parent = r,
 	})
-	mk(\"UICorner\", { CornerRadius = UDim.new(0, 5), Parent = box })
-	mk(\"UIStroke\", { Color = Color3.fromRGB(80,180,110), Thickness = 1, Transparency = 0.5, Parent = box })
+	mk("UICorner", { CornerRadius = UDim.new(0, 5), Parent = box })
+	mk("UIStroke", { Color = Color3.fromRGB(80,180,110), Thickness = 1, Transparency = 0.5, Parent = box })
 
-	local maxBtn = mk(\"TextButton\", {
+	local maxBtn = mk("TextButton", {
 		Size = UDim2.new(0, 36, 0, 30), Position = UDim2.new(1, -82, 0.5, -15),
 		BackgroundColor3 = Color3.fromRGB(60,100,70),
-		Text = \"MAX\", Font = Enum.Font.GothamBold, TextSize = 11,
+		Text = "MAX", Font = Enum.Font.GothamBold, TextSize = 11,
 		TextColor3 = Color3.fromRGB(255,255,255), Parent = r,
 	})
-	mk(\"UICorner\", { CornerRadius = UDim.new(0, 5), Parent = maxBtn })
+	mk("UICorner", { CornerRadius = UDim.new(0, 5), Parent = maxBtn })
 
-	local rowSell = mk(\"TextButton\", {
+	local rowSell = mk("TextButton", {
 		Size = UDim2.new(0, 38, 0, 30), Position = UDim2.new(1, -42, 0.5, -15),
 		BackgroundColor3 = Color3.fromRGB(60,140,80),
-		Text = \"Sell\", Font = Enum.Font.GothamBold, TextSize = 12,
+		Text = "Sell", Font = Enum.Font.GothamBold, TextSize = 12,
 		TextColor3 = Color3.fromRGB(255,255,255), Parent = r,
 	})
-	mk(\"UICorner\", { CornerRadius = UDim.new(0, 5), Parent = rowSell })
+	mk("UICorner", { CornerRadius = UDim.new(0, 5), Parent = rowSell })
 
 	local function clampQty(n)
 		n = tonumber(n) or 0
@@ -517,13 +503,13 @@ local function buildRow(group)
 	end)
 	rowSell.MouseButton1Click:Connect(function()
 		local n = clampQty(box.Text)
-		if n <= 0 then setStatus(\"Enter quantity first\", false) return end
+		if n <= 0 then setStatus("Enter quantity first", false) return end
 		SelectedQty[CurrentTab][key] = n
-		setStatus((\"Selling %d %s...\"):format(n, group.name), true)
+		setStatus(("Selling %d %s..."):format(n, group.name), true)
 		task.spawn(function()
 			local needTP = true
 			local _, hrp = getSellPrompt()
-			local myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild(\"HumanoidRootPart\")
+			local myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 			if hrp and myHRP and (hrp.Position - myHRP.Position).Magnitude < 8 then needTP = false end
 			if needTP then teleportToSteven(); task.wait(0.5) end
 			local sold, fail = 0, 0
@@ -536,7 +522,7 @@ local function buildRow(group)
 			end
 			if CFG.TeleportBack and needTP then returnHome() end
 			SelectedQty[CurrentTab][key] = nil
-			setStatus((\"Sold %d / %d (%d failed)\"):format(sold, n, fail), fail == 0)
+			setStatus(("Sold %d / %d (%d failed)"):format(sold, n, fail), fail == 0)
 			refresh()
 		end)
 	end)
@@ -544,35 +530,35 @@ end
 
 refresh = function()
 	for _, c in ipairs(List:GetChildren()) do
-		if not c:IsA(\"UIListLayout\") and not c:IsA(\"UIPadding\") then c:Destroy() end
+		if not c:IsA("UIListLayout") and not c:IsA("UIPadding") then c:Destroy() end
 	end
 	local groups = scanGrouped(CurrentTab)
 	if #groups == 0 then
-		mk(\"TextLabel\", { Size = UDim2.new(1, -12, 0, 60), BackgroundTransparency = 1,
-			Text = \"No \" .. CurrentTab:lower() .. \" found.\nMake sure they are in your Backpack.\",
+		mk("TextLabel", { Size = UDim2.new(1, -12, 0, 60), BackgroundTransparency = 1,
+			Text = "No " .. CurrentTab:lower() .. " found.\nMake sure they are in your Backpack.",
 			Font = Enum.Font.Gotham, TextSize = 14, TextColor3 = Color3.fromRGB(180,180,180),
 			TextWrapped = true, Parent = List })
-		setStatus((\"Scanned: 0 unique %s\"):format(CurrentTab:lower()), false)
+		setStatus(("Scanned: 0 unique %s"):format(CurrentTab:lower()), false)
 	else
 		local total = 0
 		for _, g in ipairs(groups) do total = total + g.count; buildRow(g) end
-		setStatus((\"%d unique %s (%d total)\"):format(#groups, CurrentTab:lower(), total), true)
+		setStatus(("%d unique %s (%d total)"):format(#groups, CurrentTab:lower(), total), true)
 	end
 	List.CanvasSize = UDim2.new(0, 0, 0, ListLayout.AbsoluteContentSize.Y + 12)
 end
 
 local function setTab(t)
 	CurrentTab = t
-	PetsTab.BackgroundColor3 = t == \"Pets\" and Color3.fromRGB(60,140,80) or Color3.fromRGB(35,50,38)
-	SeedsTab.BackgroundColor3 = t == \"Seeds\" and Color3.fromRGB(60,140,80) or Color3.fromRGB(35,50,38)
+	PetsTab.BackgroundColor3 = t == "Pets" and Color3.fromRGB(60,140,80) or Color3.fromRGB(35,50,38)
+	SeedsTab.BackgroundColor3 = t == "Seeds" and Color3.fromRGB(60,140,80) or Color3.fromRGB(35,50,38)
 	refresh()
 end
-PetsTab.MouseButton1Click:Connect(function() setTab(\"Pets\") end)
-SeedsTab.MouseButton1Click:Connect(function() setTab(\"Seeds\") end)
+PetsTab.MouseButton1Click:Connect(function() setTab("Pets") end)
+SeedsTab.MouseButton1Click:Connect(function() setTab("Seeds") end)
 Refresh.MouseButton1Click:Connect(refresh)
 TpBack.MouseButton1Click:Connect(function()
 	CFG.TeleportBack = not CFG.TeleportBack
-	TpBack.Text = \"TP-Back: \" .. (CFG.TeleportBack and \"ON\" or \"OFF\")
+	TpBack.Text = "TP-Back: " .. (CFG.TeleportBack and "ON" or "OFF")
 end)
 SelAllBtn.MouseButton1Click:Connect(function()
 	for _, g in ipairs(scanGrouped(CurrentTab)) do
@@ -582,26 +568,26 @@ SelAllBtn.MouseButton1Click:Connect(function()
 end)
 
 SellAll.MouseButton1Click:Connect(function()
-	setStatus(\"Selling entire inventory via Steven...\", true)
+	setStatus("Selling entire inventory via Steven...", true)
 	task.spawn(function()
 		local needTP = true
 		local _, hrp = getSellPrompt()
-		local myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild(\"HumanoidRootPart\")
+		local myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 		if hrp and myHRP and (hrp.Position - myHRP.Position).Magnitude < 8 then needTP = false end
 		if needTP then teleportToSteven(); task.wait(0.5) end
 		local ok = sellInventoryViaNPC()
 		if CFG.TeleportBack and needTP then returnHome() end
-		setStatus(ok and \"Sold entire inventory\" or \"Failed - no Sell dialog button found\", ok)
+		setStatus(ok and "Sold entire inventory" or "Failed - no Sell dialog button found", ok)
 		refresh()
 	end)
 end)
 
 SellSel.MouseButton1Click:Connect(function()
-	setStatus(\"Selling selected quantities (Sell This! each)...\", true)
+	setStatus("Selling selected quantities (Sell This! each)...", true)
 	task.spawn(function()
 		local needTP = true
 		local _, hrp = getSellPrompt()
-		local myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild(\"HumanoidRootPart\")
+		local myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 		if hrp and myHRP and (hrp.Position - myHRP.Position).Magnitude < 8 then needTP = false end
 		if needTP then teleportToSteven(); task.wait(0.5) end
 		local sold, fail = 0, 0
@@ -619,7 +605,7 @@ SellSel.MouseButton1Click:Connect(function()
 			end
 		end
 		if CFG.TeleportBack and needTP then returnHome() end
-		setStatus((\"Sold %d (%d failed)\"):format(sold, fail), fail == 0)
+		setStatus(("Sold %d (%d failed)"):format(sold, fail), fail == 0)
 		refresh()
 	end)
 end)
@@ -627,25 +613,25 @@ end)
 Close.MouseButton1Click:Connect(function() Gui:Destroy() end)
 
 -- Floating draggable open/close pill
-local Toggle = mk(\"TextButton\", {
+local Toggle = mk("TextButton", {
 	AnchorPoint = Vector2.new(0, 0.5),
 	Position = UDim2.new(0, 16, 0.5, 0),
 	Size = UDim2.new(0, 54, 0, 54),
 	BackgroundColor3 = Color3.fromRGB(40,90,60),
-	Text = \"GAG\",
+	Text = "GAG",
 	Font = Enum.Font.GothamBold, TextSize = 14,
 	TextColor3 = Color3.fromRGB(220,255,225),
 	AutoButtonColor = false,
 	Parent = Gui, Active = true,
 })
-mk(\"UICorner\", { CornerRadius = UDim.new(1, 0), Parent = Toggle })
-mk(\"UIStroke\", { Color = Color3.fromRGB(120,220,150), Thickness = 2, Transparency = 0.2, Parent = Toggle })
+mk("UICorner", { CornerRadius = UDim.new(1, 0), Parent = Toggle })
+mk("UIStroke", { Color = Color3.fromRGB(120,220,150), Thickness = 2, Transparency = 0.2, Parent = Toggle })
 
 local isHidden = false
 local function setHidden(h)
 	isHidden = h
 	Main.Visible = not h
-	Toggle.Text = h and \"GAG\" or \"—\"
+	Toggle.Text = h and "GAG" or "—"
 	Toggle.BackgroundColor3 = h and Color3.fromRGB(40,90,60) or Color3.fromRGB(80,140,90)
 end
 
@@ -703,5 +689,5 @@ do
 	end)
 end
 
-setTab(\"Pets\")
-print(\"[GAG2 Auto-Sell v7] Loaded. Steven prompt:\", getSellPrompt() and \"OK\" or \"MISSING\")
+setTab("Pets")
+print("[GAG2 Auto-Sell v7] Loaded. Steven prompt:", getSellPrompt() and "OK" or "MISSING")
