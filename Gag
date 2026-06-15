@@ -1,3 +1,4 @@
+
 local Players             = game:GetService("Players")
 local UserInputService    = game:GetService("UserInputService")
 local CoreGui             = game:GetService("CoreGui")
@@ -269,7 +270,7 @@ local function readInventory()
 	return out
 end
 
-local function clickInventoryItem(itemFrame)
+local function clickInventoryItem(itemFrame, fast)
 	if not itemFrame or not itemFrame.Parent then return false end
 	local candidates = {}
 	for _,d in ipairs(itemFrame:GetDescendants()) do
@@ -278,7 +279,15 @@ local function clickInventoryItem(itemFrame)
 		end
 	end
 	if #candidates == 0 then
-		if itemFrame:IsA("GuiButton") then clickBtn(itemFrame); return true end
+		if itemFrame:IsA("GuiButton") then
+			if fast then
+				pcall(function() if firesignal then firesignal(itemFrame.MouseButton1Click) end end)
+				pcall(function() if firesignal then firesignal(itemFrame.Activated) end end)
+			else
+				clickBtn(itemFrame)
+			end
+			return true
+		end
 		return false
 	end
 	local function score(b)
@@ -289,11 +298,16 @@ local function clickInventoryItem(itemFrame)
 		return math.floor(b.AbsoluteSize.X * b.AbsoluteSize.Y / 100)
 	end
 	table.sort(candidates, function(a,b) return score(a) > score(b) end)
-	clickBtn(candidates[1])
+	local target = candidates[1]
+	if fast then
+		pcall(function() if firesignal then firesignal(target.MouseButton1Click) end end)
+		pcall(function() if firesignal then firesignal(target.Activated) end end)
+	else
+		clickBtn(target)
+	end
 	return true
 end
 
--- Find a fresh inventory frame for an item by bucket+name (FIX for Send Max).
 local function findInventoryFrame(bucket, itemName)
 	if not Mail.inventoryFrame or not Mail.inventoryFrame.Parent then return nil end
 	local prefix
@@ -330,40 +344,52 @@ local function sendMailPlan(plan, onProgress)
 	for _,p in ipairs(plan) do total = total + (p.count or 0) end
 	if total==0 then return false,"Pick at least one amount > 0" end
 
-	local function progress(extra)
-		if onProgress then pcall(onProgress, clicked, total, extra) end
+	local CLICK_DELAY      = 0.03  -- ~33 clicks/sec
+	local PROGRESS_EVERY   = 5
+	local RESCAN_WAIT      = 0.6
+	local MAX_FAIL_PER_ROW = 5
+
+	local lastProgressAt = 0
+	local function progress(force, extra)
+		if not onProgress then return end
+		if force or (clicked - lastProgressAt) >= PROGRESS_EVERY then
+			lastProgressAt = clicked
+			pcall(onProgress, clicked, total, extra)
+		end
 	end
 
 	local prevEnabled = Gui.Enabled
 	Gui.Enabled = false
-	task.wait(0.08)
+	task.wait(0.05)
 
 	for _,p in ipairs(plan) do
 		local bucket = p.bucket or p.entry.bucket
 		local name   = p.entry.name
-		local frame = findInventoryFrame(bucket, name) or p.entry.frame
-		local consecutiveMisses = 0
-		for i=1,p.count do
+		local frame  = findInventoryFrame(bucket, name) or p.entry.frame
+		local rowFails = 0
+		local i = 0
+		while i < p.count do
 			if not frame or not frame.Parent then
-				frame = waitForInventoryFrame(bucket, name, 1.2)
+				frame = waitForInventoryFrame(bucket, name, RESCAN_WAIT)
+				if not frame then break end
 			end
-			if not frame then break end
-			local ok = clickInventoryItem(frame)
+			local ok = clickInventoryItem(frame, true)
 			if ok then
+				i = i + 1
 				clicked = clicked + 1
-				consecutiveMisses = 0
-				progress(("%s (%d/%d)"):format(name, i, p.count))
+				progress(false, ("%s %d/%d"):format(name, i, p.count))
 			else
+				rowFails = rowFails + 1
 				failed = failed + 1
-				consecutiveMisses = consecutiveMisses + 1
-				if consecutiveMisses >= 3 then break end
+				if rowFails >= MAX_FAIL_PER_ROW then break end
+				frame = nil
 			end
-			task.wait(0.12)
-			frame = findInventoryFrame(bucket, name)
+			task.wait(CLICK_DELAY)
 		end
+		progress(true, ("%s done"):format(name))
 	end
 
-	task.wait(0.35)
+	task.wait(0.25)
 	local sendBtn = Mail.itemSendFrame and Mail.itemSendFrame:FindFirstChild("SendButton",true)
 	if sendBtn and sendBtn:IsA("GuiButton") then
 		clickBtn(sendBtn)
@@ -371,10 +397,10 @@ local function sendMailPlan(plan, onProgress)
 		Gui.Enabled = prevEnabled
 		return false, ("Queued %d/%d but SendButton missing"):format(clicked,total)
 	end
-	task.wait(0.3)
+	task.wait(0.25)
 	Gui.Enabled = prevEnabled
 	local summary = ("Sent %d/%d to %s"):format(clicked, total, Mail.recipient)
-	if failed > 0 then summary = summary .. (" (%d retries failed)"):format(failed) end
+	if failed > 0 then summary = summary .. (" (%d retries)"):format(failed) end
 	return true, summary
 end
 
@@ -402,7 +428,7 @@ mk("UIListLayout",{Padding=UDim.new(0,8),SortOrder=Enum.SortOrder.LayoutOrder,Pa
 local Bar=mk("Frame",{Size=UDim2.new(1,0,0,46),LayoutOrder=1,BackgroundColor3=TH.panel,BorderSizePixel=0,Parent=Main})
 mk("UICorner",{CornerRadius=UDim.new(0,10),Parent=Bar}); mk("UIStroke",{Color=TH.stroke,Thickness=1,Transparency=0.6,Parent=Bar})
 mk("TextLabel",{Size=UDim2.new(1,-100,1,0),Position=UDim2.new(0,14,0,0),BackgroundTransparency=1,
-	Text="GAG2 Auto Suite  v9.2",Font=Enum.Font.GothamBlack,TextSize=17,TextColor3=TH.text,
+	Text="GAG2 Auto Suite  v9.3",Font=Enum.Font.GothamBlack,TextSize=17,TextColor3=TH.text,
 	TextXAlignment=Enum.TextXAlignment.Left,Parent=Bar})
 local Mini=mk("TextButton",{Size=UDim2.new(0,38,0,34),Position=UDim2.new(1,-86,0.5,-17),BackgroundColor3=Color3.fromRGB(70,110,80),Text="—",Font=Enum.Font.GothamBold,TextSize=18,TextColor3=TH.text,Parent=Bar})
 mk("UICorner",{CornerRadius=UDim.new(0,8),Parent=Mini})
@@ -726,4 +752,4 @@ do local drag,start,sp
 end
 
 setTab("Pets")
-print("[GAG2 v9.2] Loaded.  Steven:",getSellPrompt() and "OK" or "MISSING","Mailbox:",findMailboxPrompt() and "OK" or "MISSING")
+print("[GAG2 v9.3] Loaded.  Steven:",getSellPrompt() and "OK" or "MISSING","Mailbox:",findMailboxPrompt() and "OK" or "MISSING")
