@@ -1,66 +1,50 @@
-local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-local CoreGui = game:GetService("CoreGui")
-local Workspace = game:GetService("Workspace")
+local Players             = game:GetService("Players")
+local UserInputService    = game:GetService("UserInputService")
+local CoreGui             = game:GetService("CoreGui")
+local Workspace           = game:GetService("Workspace")
 local VirtualInputManager = game:GetService("VirtualInputManager")
-local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-
-local DEBUG = true
-local function dprint(...) if DEBUG then print("[GAG2]", ...) end end
+local LocalPlayer         = Players.LocalPlayer
+local PlayerGui           = LocalPlayer:WaitForChild("PlayerGui")
 
 local CFG = { NPCName = "Steven", TeleportBack = true }
-local CurrentTab = "Pets"
-local SelectedQty = { Pets = {}, Seeds = {} }
+local CurrentTab  = "Pets"
+local MailSubTab  = "Seeds"
+local SelectedQty = { Pets = {}, Seeds = {}, MailSeeds={}, MailPets={}, MailCrates={}, MailGears={} }
 
--- Grow a Garden 2 pets (verified against growagarden2wiki.com)
 local PET_RARITY = {
-	["Frog"]="Common", ["Bunny"]="Common",
-	["Owl"]="Uncommon",
-	["Deer"]="Rare",
-	["Robin"]="Legendary", ["Bee"]="Legendary",
-	["Monkey"]="Mythic", ["Golden Dragonfly"]="Mythic", ["Unicorn"]="Mythic",
-	["Raccoon"]="Super", ["Ice Serpent"]="Super", ["Black Dragon"]="Super",
+	["Frog"]="Common",["Bunny"]="Common",["Owl"]="Uncommon",["Deer"]="Rare",
+	["Robin"]="Legendary",["Bee"]="Legendary",["Monkey"]="Mythic",
+	["Golden Dragonfly"]="Mythic",["Unicorn"]="Mythic",["Raccoon"]="Super",
+	["Ice Serpent"]="Super",["Black Dragon"]="Super",
 }
-
--- Grow a Garden 2 seeds (verified against growagarden2wiki.net)
 local SEED_RARITY = {
-	["Carrot"]="Common", ["Blueberry"]="Common", ["Strawberry"]="Common",
-	["Apple"]="Uncommon", ["Pumpkin"]="Uncommon", ["Tomato"]="Uncommon", ["Tulip"]="Uncommon",
-	["Bamboo"]="Rare", ["Cactus"]="Rare", ["Corn"]="Rare", ["Pineapple"]="Rare",
-	["Banana"]="Epic", ["Coconut"]="Epic", ["Grape"]="Epic", ["Green Bean"]="Epic",
-	["Mango"]="Epic", ["Mushroom"]="Epic",
-	["Acorn"]="Legendary", ["Cherry"]="Legendary", ["Dragon Fruit"]="Legendary",
-	["Sunflower"]="Legendary",
-	["Beanstalk"]="Mythic", ["Lotus"]="Mythic", ["Poison Apple"]="Mythic",
-	["Pomegranate"]="Mythic", ["Venus Flytrap"]="Mythic", ["Venus Fly Trap"]="Mythic",
-	["Moon Bloom"]="Super", ["Dragon's Breath"]="Super", ["Dragons Breath"]="Super",
-	["Thorn Rose"]="Super",
+	["Carrot"]="Common",["Blueberry"]="Common",["Strawberry"]="Common",
+	["Apple"]="Uncommon",["Pumpkin"]="Uncommon",["Tomato"]="Uncommon",["Tulip"]="Uncommon",
+	["Bamboo"]="Rare",["Cactus"]="Rare",["Corn"]="Rare",["Pineapple"]="Rare",
+	["Banana"]="Epic",["Coconut"]="Epic",["Grape"]="Epic",["Green Bean"]="Epic",
+	["Mango"]="Epic",["Mushroom"]="Epic",["Acorn"]="Legendary",["Cherry"]="Legendary",
+	["Dragon Fruit"]="Legendary",["Sunflower"]="Legendary",["Beanstalk"]="Mythic",
+	["Lotus"]="Mythic",["Poison Apple"]="Mythic",["Pomegranate"]="Mythic",
+	["Venus Flytrap"]="Mythic",["Venus Fly Trap"]="Mythic",["Moon Bloom"]="Super",
+	["Dragon's Breath"]="Super",["Dragons Breath"]="Super",["Thorn Rose"]="Super",
 }
-
 local RARITY_COLOR = {
-	Common = Color3.fromRGB(190,190,190),
-	Uncommon = Color3.fromRGB(120,220,140),
-	Rare = Color3.fromRGB(110,170,255),
-	Epic = Color3.fromRGB(180,120,255),
-	Legendary = Color3.fromRGB(255,180,80),
-	Mythic = Color3.fromRGB(220,120,255),
-	Super = Color3.fromRGB(255,80,80),
+	Common=Color3.fromRGB(190,190,190),Uncommon=Color3.fromRGB(120,220,140),
+	Rare=Color3.fromRGB(110,170,255),Epic=Color3.fromRGB(180,120,255),
+	Legendary=Color3.fromRGB(255,180,80),Mythic=Color3.fromRGB(220,120,255),
+	Super=Color3.fromRGB(255,80,80),Gear=Color3.fromRGB(150,210,230),
+	Crate=Color3.fromRGB(210,180,140),Other=Color3.fromRGB(200,200,200),
 }
 
-local function normalizeName(s)
-	return (tostring(s or ""):lower():gsub("[%s_%-:'%.]", ""))
-end
-
+local function normalizeName(s) return (tostring(s or ""):lower():gsub("[%s_%-:'%.]", "")) end
 local PET_LOOKUP, SEED_LOOKUP = {}, {}
-for k in pairs(PET_RARITY) do PET_LOOKUP[normalizeName(k)] = k end
+for k in pairs(PET_RARITY)  do PET_LOOKUP[normalizeName(k)]  = k end
 for k in pairs(SEED_RARITY) do SEED_LOOKUP[normalizeName(k)] = k end
 
 local function stripInvPrefix(name)
 	local s = tostring(name or "")
-	for _, p in ipairs({"^Inv_Pets:", "^Inv_Seeds:", "^Inv_Crates:",
-		"^Inv_Mushrooms:", "^Inv_Sprinklers:", "^Inv_WateringCans:"}) do
-		s = s:gsub(p, "")
+	for _,p in ipairs({"^Inv_Pets:","^Inv_Seeds:","^Inv_Crates:","^Inv_Mushrooms:","^Inv_Sprinklers:","^Inv_WateringCans:"}) do
+		s = s:gsub(p,"")
 	end
 	return s
 end
@@ -68,923 +52,593 @@ end
 local function resolveItemName(tool)
 	local clean = stripInvPrefix(tool.Name)
 	local key = normalizeName(clean)
-	if PET_LOOKUP[key] then return PET_LOOKUP[key], "Pets" end
+	if PET_LOOKUP[key]  then return PET_LOOKUP[key],  "Pets"  end
 	if SEED_LOOKUP[key] then return SEED_LOOKUP[key], "Seeds" end
-
-	local ok, attrs = pcall(function() return tool:GetAttributes() end)
-	if ok and type(attrs) == "table" then
-		for _, v in pairs(attrs) do
-			if type(v) == "string" and v ~= "" then
-				local vk = normalizeName(stripInvPrefix(v))
-				if PET_LOOKUP[vk] then return PET_LOOKUP[vk], "Pets" end
-				if SEED_LOOKUP[vk] then return SEED_LOOKUP[vk], "Seeds" end
-			end
-		end
-	end
-
-	for _, c in ipairs(tool:GetChildren()) do
-		if c:IsA("StringValue") then
-			local vk = normalizeName(stripInvPrefix(c.Value))
-			if PET_LOOKUP[vk] then return PET_LOOKUP[vk], "Pets" end
-			if SEED_LOOKUP[vk] then return SEED_LOOKUP[vk], "Seeds" end
-		end
-		local cnk = normalizeName(stripInvPrefix(c.Name))
-		if PET_LOOKUP[cnk] then return PET_LOOKUP[cnk], "Pets" end
-		if SEED_LOOKUP[cnk] then return SEED_LOOKUP[cnk], "Seeds" end
-	end
-
 	local cat = tostring(tool:GetAttribute("Category") or tool:GetAttribute("Type") or ""):lower()
-	if cat:find("pet") then return clean, "Pets" end
-	if cat:find("seed") then return clean, "Seeds" end
-
-	return nil, nil
+	if cat:find("pet")  then return clean,"Pets"  end
+	if cat:find("seed") then return clean,"Seeds" end
+	return nil,nil
 end
 
 local function scanGrouped(category)
 	local groups, order = {}, {}
-	local sources = { LocalPlayer:FindFirstChild("Backpack"), LocalPlayer.Character }
-	for _, src in ipairs(sources) do
+	for _,src in ipairs({LocalPlayer:FindFirstChild("Backpack"), LocalPlayer.Character}) do
 		if src then
-			for _, t in ipairs(src:GetChildren()) do
+			for _,t in ipairs(src:GetChildren()) do
 				if t:IsA("Tool") then
-					local name, cat = resolveItemName(t)
-					-- Skip any pet with "Big" in the name
-					if name and cat == category and not (cat == "Pets" and name:lower():find("big", 1, true)) then
-						local rarity = (category == "Pets" and PET_RARITY[name])
-							or (category == "Seeds" and SEED_RARITY[name])
+					local name,cat = resolveItemName(t)
+					if name and cat==category and not (cat=="Pets" and name:lower():find("big",1,true)) then
+						local rarity = (cat=="Pets" and PET_RARITY[name]) or (cat=="Seeds" and SEED_RARITY[name])
 							or tostring(t:GetAttribute("Rarity") or "Common")
 						local g = groups[name]
-						if not g then
-							g = { name = name, rarity = rarity, count = 0, tools = {} }
-							groups[name] = g; table.insert(order, name)
-						end
-						g.count = g.count + 1
-						table.insert(g.tools, t)
+						if not g then g={name=name,rarity=rarity,count=0,tools={}}; groups[name]=g; table.insert(order,name) end
+						g.count = g.count+1; table.insert(g.tools,t)
 					end
 				end
 			end
 		end
 	end
-	local rank = { Super=7, Mythic=6, Legendary=5, Epic=4,
-		Rare=3, Uncommon=2, Common=1 }
-	table.sort(order, function(a, b)
-		local ra, rb = rank[groups[a].rarity] or 0, rank[groups[b].rarity] or 0
-		if ra ~= rb then return ra > rb end
-		return a < b
+	local rank={Super=7,Mythic=6,Legendary=5,Epic=4,Rare=3,Uncommon=2,Common=1}
+	table.sort(order,function(a,b)
+		local ra,rb=rank[groups[a].rarity] or 0, rank[groups[b].rarity] or 0
+		if ra~=rb then return ra>rb end; return a<b
 	end)
-	local out = {}
-	for _, n in ipairs(order) do table.insert(out, groups[n]) end
-	return out
+	local out={}; for _,n in ipairs(order) do table.insert(out,groups[n]) end; return out
 end
 
+-- ============ Sell-NPC helpers (unchanged from your working v8) ============
 local function getSellPrompt()
-	local npcs = Workspace:FindFirstChild("NPCS") or Workspace:FindFirstChild("NPCs")
-	if not npcs then return nil end
-	local steven = npcs:FindFirstChild(CFG.NPCName)
-	if not steven then return nil end
-	local hrp = steven:FindFirstChild("HumanoidRootPart") or steven.PrimaryPart
-	if not hrp then return nil end
+	local npcs = Workspace:FindFirstChild("NPCS") or Workspace:FindFirstChild("NPCs"); if not npcs then return nil end
+	local steven = npcs:FindFirstChild(CFG.NPCName); if not steven then return nil end
+	local hrp = steven:FindFirstChild("HumanoidRootPart") or steven.PrimaryPart; if not hrp then return nil end
 	return hrp:FindFirstChildOfClass("ProximityPrompt"), hrp
 end
-
 local origCFrame
 local function teleportToSteven()
-	local _, hrp = getSellPrompt()
-	if not hrp then return false end
-	local char = LocalPlayer.Character
-	local myHRP = char and char:FindFirstChild("HumanoidRootPart")
-	if not myHRP then return false end
-	origCFrame = myHRP.CFrame
-	myHRP.CFrame = hrp.CFrame * CFrame.new(0, 0, 4)
-	return true
+	local _,hrp=getSellPrompt(); if not hrp then return false end
+	local myHRP=LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart"); if not myHRP then return false end
+	origCFrame=myHRP.CFrame; myHRP.CFrame=hrp.CFrame*CFrame.new(0,0,4); return true
 end
 local function returnHome()
 	if not origCFrame then return end
-	local char = LocalPlayer.Character
-	local myHRP = char and char:FindFirstChild("HumanoidRootPart")
-	if myHRP then myHRP.CFrame = origCFrame end
-	origCFrame = nil
+	local myHRP=LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+	if myHRP then myHRP.CFrame=origCFrame end; origCFrame=nil
 end
-local function talkToSteven()
-	local prompt = getSellPrompt()
-	if not prompt then return false end
-	return (pcall(function() fireproximityprompt(prompt) end))
-end
-local function equipTool(tool)
-	local char = LocalPlayer.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if hum then pcall(function() hum:EquipTool(tool) end) end
-end
-
--- === FIXED: Robust Billboard search + VirtualInputManager clicking ===
-
-local function collectBillboards()
-	local found = {}
-	local roots = { PlayerGui }
-	pcall(function() table.insert(roots, CoreGui) end)
-	for _, root in ipairs(roots) do
-		if root then
-			for _, d in ipairs(root:GetDescendants()) do
-				if d.Name == "Billboard_UI" then
-					table.insert(found, d)
-				end
-			end
-		end
-	end
-	return found
-end
-
-local function findOptionButtonByText(needle)
-	needle = tostring(needle):lower()
-	for _, billboard in ipairs(collectBillboards()) do
-		-- Search ALL descendants (not just Objects children) in case UI nests differently
-		for _, opt in ipairs(billboard:GetDescendants()) do
-			if opt.Name == "Option_UI" and opt:IsA("GuiObject") then
-				local te, btn
-				for _, d in ipairs(opt:GetDescendants()) do
-					if not te and d.Name == "Text_Element" and d:IsA("TextLabel") then te = d end
-					if not btn and (d:IsA("ImageButton") or d:IsA("TextButton")) then btn = d end
-					if te and btn then break end
-				end
-				if te and btn then
-					local t = tostring(te.Text or ""):lower()
-					if t:find(needle, 1, true) then
-						dprint("Found option '" .. needle .. "': text='" .. te.Text .. "' btn=" .. btn:GetFullName())
-						return btn, te, opt
-					end
-				end
-			end
-		end
-	end
-	return nil
-end
-
-local function waitForOption(needle, timeout)
-	timeout = timeout or 4
-	local t0 = tick()
-	while tick() - t0 < timeout do
-		local b, te, opt = findOptionButtonByText(needle)
-		if b then return b, te, opt end
-		task.wait(0.08)
-	end
-	dprint("waitForOption: timed out waiting for '" .. needle .. "'")
-	-- Dump diagnostics
-	for _, bb in ipairs(collectBillboards()) do
-		dprint("billboard:", bb:GetFullName())
-		for _, d in ipairs(bb:GetDescendants()) do
-			if d.Name == "Option_UI" then
-				dprint("  Option_UI:", d:GetFullName(), "| Visible:", tostring(d.Visible))
-			end
-			if d.Name == "Text_Element" and d:IsA("TextLabel") then
-				dprint("  Text_Element text:", tostring(d.Text))
-			end
-		end
-	end
-	return nil
-end
-
--- Primary click method: VirtualInputManager simulates a real mouse click at the button's screen position
-local function clickGuiButton(btn)
+local function talkToSteven() local p=getSellPrompt(); if not p then return false end; return (pcall(function() fireproximityprompt(p) end)) end
+local function equipTool(tool) local hum=LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid"); if hum then pcall(function() hum:EquipTool(tool) end) end end
+local function clickBtn(btn)
 	if not btn or not btn.Parent then return false end
-	local pos = btn.AbsolutePosition
-	local sz  = btn.AbsoluteSize
-	local cx = math.floor(pos.X + sz.X * 0.5)
-	local cy = math.floor(pos.Y + sz.Y * 0.5)
-	dprint(("Clicking @ %d,%d on %s"):format(cx, cy, btn:GetFullName()))
-
-	-- 1. VirtualInputManager mouse click (most reliable)
-	pcall(function()
-		VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true,  game, 0)
-		task.wait(0.02)
-		VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 0)
-	end)
-	task.wait(0.02)
-
-	-- 2. VirtualInputManager touch (mobile / some executors)
-	pcall(function()
-		VirtualInputManager:SendTouchEvent(1, 1, cx, cy)
-		task.wait(0.02)
-		VirtualInputManager:SendTouchEvent(1, 2, cx, cy)
-		VirtualInputManager:SendTouchEvent(1, 3, cx, cy)
-	end)
-	task.wait(0.02)
-
-	-- 3. firesignal fallbacks (high-tier executors only, wrapped safely)
-	pcall(function() if firesignal then firesignal(btn.MouseButton1Down) end end)
-	pcall(function() if firesignal then firesignal(btn.MouseButton1Up)   end end)
+	local p,sz=btn.AbsolutePosition,btn.AbsoluteSize
+	local cx,cy=math.floor(p.X+sz.X*0.5),math.floor(p.Y+sz.Y*0.5)
+	pcall(function() VirtualInputManager:SendMouseButtonEvent(cx,cy,0,true,game,0); VirtualInputManager:SendMouseButtonEvent(cx,cy,0,false,game,0) end)
+	pcall(function() VirtualInputManager:SendTouchEvent(1,1,cx,cy); VirtualInputManager:SendTouchEvent(1,2,cx,cy); VirtualInputManager:SendTouchEvent(1,3,cx,cy) end)
 	pcall(function() if firesignal then firesignal(btn.MouseButton1Click) end end)
-	pcall(function() if firesignal then firesignal(btn.Activated)        end end)
-
-	-- 4. :Fire() fallbacks
+	pcall(function() if firesignal then firesignal(btn.Activated) end end)
 	pcall(function() btn.MouseButton1Click:Fire() end)
-	pcall(function() btn.Activated:Fire(Enum.UserInputType.MouseButton1) end)
-
 	return true
 end
-
-local function pickSellThis()
-	local btn, te, opt = waitForOption("sell this", 4)
-	if not btn then
-		dprint("pickSellThis: 'Sell This' option NOT FOUND after waiting")
-		return false
-	end
-	-- Click multiple times to ensure it registers
-	for _ = 1, 1 do
-		if not btn or not btn.Parent then break end
-		clickGuiButton(btn)
-		task.wait(0.02)
-	end
-	return true
+local function findBillboardOpt(needle)
+	needle=needle:lower()
+	local roots={PlayerGui}; pcall(function() table.insert(roots,CoreGui) end)
+	for _,r in ipairs(roots) do for _,d in ipairs(r:GetDescendants()) do
+		if d.Name=="Option_UI" and d:IsA("GuiObject") then
+			local te,btn
+			for _,c in ipairs(d:GetDescendants()) do
+				if not te and c.Name=="Text_Element" and c:IsA("TextLabel") then te=c end
+				if not btn and (c:IsA("ImageButton") or c:IsA("TextButton")) then btn=c end
+			end
+			if te and btn and tostring(te.Text or ""):lower():find(needle,1,true) then return btn end
+		end
+	end end
 end
-
+local function waitOpt(needle,t) local t0=tick(); while tick()-t0<(t or 4) do local b=findBillboardOpt(needle); if b then return b end; task.wait(0.08) end end
 local function sellOneTool(tool)
 	if not tool or not tool.Parent then return false end
-	equipTool(tool); task.wait(0.15)
-	talkToSteven(); task.wait(0.3)  -- dialog needs time to render before clicking
-	local ok = pickSellThis()
-	task.wait(0.15)
-	return ok
+	equipTool(tool); task.wait(0.15); talkToSteven(); task.wait(0.3)
+	local b=waitOpt("sell this",4); if not b then return false end
+	clickBtn(b); task.wait(0.15); return true
 end
-
-local function sellInventoryViaNPC()
+local function sellInvViaNPC()
 	talkToSteven(); task.wait(0.15)
-	local btn = waitForOption("sell inventory", 4)
-	if not btn then
-		dprint("sellInventoryViaNPC: 'Sell Inventory' option NOT FOUND")
-		return false
-	end
-	for _ = 1, 2 do clickGuiButton(btn); task.wait(0.02) end
-	task.wait(0.1)
-	return true
+	local b=waitOpt("sell inventory",4); if not b then return false end
+	for _=1,2 do clickBtn(b); task.wait(0.02) end; task.wait(0.1); return true
 end
 
--- === GUI (unchanged from original) ===
+-- ============ Mailbox helpers (live read from MailboxUI) ============
+local INV_PREFIX = { Seeds="Inv_Seeds:", Pets="Inv_Pets:", Crates="Inv_Crates:" }
+local GEAR_PREFIXES = { "Inv_Mushrooms:", "Inv_Sprinklers:", "Inv_WateringCans:" }
 
-local old = (CoreGui:FindFirstChild("GAG2AS")) or (PlayerGui:FindFirstChild("GAG2AS"))
-if old then old:Destroy() end
-local parent = CoreGui
-if not pcall(function() return CoreGui.Name end) then parent = PlayerGui end
+local Mail = { ui=nil, sendingFrame=nil, itemSendFrame=nil, inventoryFrame=nil, recipientLocked=false, recipient="" }
 
-local Gui = Instance.new("ScreenGui")
-Gui.Name = "GAG2AS"; Gui.ResetOnSpawn = false; Gui.IgnoreGuiInset = true; Gui.Parent = parent
-
-local function mk(c, p) local i = Instance.new(c); for k, v in pairs(p) do i[k] = v end; return i end
-
-local Main = mk("Frame", {
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.new(0.5, 0, 0.5, 0),
-	Size = UDim2.new(0.92, 0, 0.85, 0),
-	BackgroundColor3 = Color3.fromRGB(22, 28, 24),
-	BorderSizePixel = 0, Parent = Gui, Active = true,
-})
-mk("UISizeConstraint", { MaxSize = Vector2.new(480, 720), MinSize = Vector2.new(280, 360), Parent = Main })
-mk("UICorner", { CornerRadius = UDim.new(0, 12), Parent = Main })
-mk("UIStroke", { Color = Color3.fromRGB(80,180,110), Thickness = 1.5, Transparency = 0.4, Parent = Main })
-mk("UIPadding", { PaddingTop = UDim.new(0,8), PaddingBottom = UDim.new(0,8),
-	PaddingLeft = UDim.new(0,8), PaddingRight = UDim.new(0,8), Parent = Main })
-mk("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 6),
-	SortOrder = Enum.SortOrder.LayoutOrder, Parent = Main })
-
-local Bar = mk("Frame", { Size = UDim2.new(1, 0, 0, 40), LayoutOrder = 1,
-	BackgroundColor3 = Color3.fromRGB(28,38,30), BorderSizePixel = 0, Parent = Main })
-mk("UICorner", { CornerRadius = UDim.new(0, 8), Parent = Bar })
-mk("TextLabel", { Size = UDim2.new(1, -90, 1, 0), Position = UDim2.new(0, 12, 0, 0),
-	BackgroundTransparency = 1, Text = "GAG2 Auto-Sell v8 MAIL",
-	Font = Enum.Font.GothamBold, TextSize = 17, TextColor3 = Color3.fromRGB(170,230,180),
-	TextXAlignment = Enum.TextXAlignment.Left, Parent = Bar })
-
-local Mini = mk("TextButton", { Size = UDim2.new(0, 36, 0, 32), Position = UDim2.new(1, -82, 0, 4),
-	BackgroundColor3 = Color3.fromRGB(70,110,80), Text = "—",
-	Font = Enum.Font.GothamBold, TextSize = 18, TextColor3 = Color3.fromRGB(255,255,255), Parent = Bar })
-mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = Mini })
-
-local Close = mk("TextButton", { Size = UDim2.new(0, 36, 0, 32), Position = UDim2.new(1, -40, 0, 4),
-	BackgroundColor3 = Color3.fromRGB(180,60,60), Text = "X",
-	Font = Enum.Font.GothamBold, TextSize = 16, TextColor3 = Color3.fromRGB(255,255,255), Parent = Bar })
-mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = Close })
-
-local Tabs = mk("Frame", { Size = UDim2.new(1, 0, 0, 38), LayoutOrder = 2,
-	BackgroundTransparency = 1, Parent = Main })
-local function mkTab(label, posScale)
-	local b = mk("TextButton", {
-		Size = UDim2.new(0.31, 0, 1, 0), Position = UDim2.new(posScale, 0, 0, 0),
-		BackgroundColor3 = Color3.fromRGB(35,50,38), Text = label,
-		Font = Enum.Font.GothamBold, TextSize = 14,
-		TextColor3 = Color3.fromRGB(220,220,220), Parent = Tabs,
-	})
-	mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = b }); return b
-end
-local PetsTab  = mkTab("Pets",  0)
-local SeedsTab = mkTab("Seeds", 0.345)
-local MailTab  = mkTab("Mail",  0.69)
-
-local List = mk("ScrollingFrame", {
-	Size = UDim2.new(1, 0, 1, -200), LayoutOrder = 3,
-	BackgroundColor3 = Color3.fromRGB(18,24,20), BorderSizePixel = 0,
-	CanvasSize = UDim2.new(0, 0, 0, 0), ScrollBarThickness = 8,
-	ScrollBarImageColor3 = Color3.fromRGB(80,180,110), Parent = Main,
-})
-mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = List })
-local ListLayout = mk("UIListLayout", { Padding = UDim.new(0, 4),
-	SortOrder = Enum.SortOrder.LayoutOrder, Parent = List })
-mk("UIPadding", { PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0,6),
-	PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), Parent = List })
-
--- === Mail Panel (shown when Mail tab is active) ===
-local MailPanel = mk("Frame", {
-	Size = UDim2.new(1, 0, 1, -200), LayoutOrder = 3,
-	BackgroundColor3 = Color3.fromRGB(18,24,20),
-	BorderSizePixel = 0, Visible = false, Parent = Main,
-})
-mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = MailPanel })
-mk("UIPadding", { PaddingTop = UDim.new(0,10), PaddingBottom = UDim.new(0,10),
-	PaddingLeft = UDim.new(0,10), PaddingRight = UDim.new(0,10), Parent = MailPanel })
-mk("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 8),
-	SortOrder = Enum.SortOrder.LayoutOrder, Parent = MailPanel })
-
-local function mkMailLabel(text, order)
-	local l = mk("TextLabel", {
-		Size = UDim2.new(1, 0, 0, 18), LayoutOrder = order,
-		BackgroundTransparency = 1, Text = text,
-		Font = Enum.Font.GothamBold, TextSize = 12,
-		TextColor3 = Color3.fromRGB(120,200,140),
-		TextXAlignment = Enum.TextXAlignment.Left, Parent = MailPanel,
-	})
-	return l
-end
-local function mkMailBox(placeholder, order)
-	local b = mk("TextBox", {
-		Size = UDim2.new(1, 0, 0, 34), LayoutOrder = order,
-		BackgroundColor3 = Color3.fromRGB(30,42,32),
-		Text = "", PlaceholderText = placeholder,
-		Font = Enum.Font.Gotham, TextSize = 14,
-		TextColor3 = Color3.fromRGB(255,255,255),
-		PlaceholderColor3 = Color3.fromRGB(120,140,120),
-		ClearTextOnFocus = false, Parent = MailPanel,
-	})
-	mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = b })
-	mk("UIStroke", { Color = Color3.fromRGB(80,180,110), Thickness = 1, Transparency = 0.5, Parent = b })
-	mk("UIPadding", { PaddingLeft = UDim.new(0,8), PaddingRight = UDim.new(0,8), Parent = b })
-	return b
-end
-
-mkMailLabel("Username to send to:", 1)
-local MailUserBox = mkMailBox("e.g. Player123", 2)
-mkMailLabel("Item name (e.g. Bamboo, Bee, Raccoon):", 3)
-local MailItemBox = mkMailBox("e.g. Bamboo", 4)
-mkMailLabel("Quantity:", 5)
-local MailQtyBox  = mkMailBox("e.g. 1000", 6)
-
--- Item type row
-local MailTypeRow = mk("Frame", {
-	Size = UDim2.new(1, 0, 0, 34), LayoutOrder = 7,
-	BackgroundTransparency = 1, Parent = MailPanel,
-})
-mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal,
-	Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder, Parent = MailTypeRow })
-
-local mailItemType = "Seeds"
-local function mkTypeBtn(label, order)
-	local b = mk("TextButton", {
-		Size = UDim2.new(0.31, 0, 1, 0), LayoutOrder = order,
-		BackgroundColor3 = Color3.fromRGB(35,50,38), Text = label,
-		Font = Enum.Font.GothamBold, TextSize = 13,
-		TextColor3 = Color3.fromRGB(220,220,220), Parent = MailTypeRow,
-	})
-	mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = b }); return b
-end
-local MailSeedsBtn = mkTypeBtn("Seeds", 1)
-local MailPetsBtn  = mkTypeBtn("Pets",  2)
-local MailCratesBtn = mkTypeBtn("Crates", 3)
-
-local MailStatus = mk("TextLabel", {
-	Size = UDim2.new(1, 0, 0, 28), LayoutOrder = 8,
-	BackgroundTransparency = 1, Text = "Fill in the fields above and press Send.",
-	Font = Enum.Font.Gotham, TextSize = 12,
-	TextColor3 = Color3.fromRGB(150,180,160),
-	TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, Parent = MailPanel,
-})
-
-local MailSendBtn = mk("TextButton", {
-	Size = UDim2.new(1, 0, 0, 38), LayoutOrder = 9,
-	BackgroundColor3 = Color3.fromRGB(50,130,170), Text = "Send Mail",
-	Font = Enum.Font.GothamBold, TextSize = 15,
-	TextColor3 = Color3.fromRGB(255,255,255), Parent = MailPanel,
-})
-mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = MailSendBtn })
-
--- Type button logic
-local function setMailType(t)
-	mailItemType = t
-	MailSeedsBtn.BackgroundColor3  = t == "Seeds"  and Color3.fromRGB(60,140,80) or Color3.fromRGB(35,50,38)
-	MailPetsBtn.BackgroundColor3   = t == "Pets"   and Color3.fromRGB(60,140,80) or Color3.fromRGB(35,50,38)
-	MailCratesBtn.BackgroundColor3 = t == "Crates" and Color3.fromRGB(60,140,80) or Color3.fromRGB(35,50,38)
-end
-setMailType("Seeds")
-MailSeedsBtn.MouseButton1Click:Connect(function() setMailType("Seeds") end)
-MailPetsBtn.MouseButton1Click:Connect(function() setMailType("Pets") end)
-MailCratesBtn.MouseButton1Click:Connect(function() setMailType("Crates") end)
-
--- Mailbox send logic
-local function clickMailBtn(button)
-	if not button or not button.Parent then return end
-	local pos = button.AbsolutePosition
-	local sz  = button.AbsoluteSize
-	local cx = math.floor(pos.X + sz.X * 0.5)
-	local cy = math.floor(pos.Y + sz.Y * 0.5)
-	pcall(function()
-		VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true,  game, 0)
-		VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 0)
-	end)
-	pcall(function() if firesignal then firesignal(button.MouseButton1Click) end end)
-	pcall(function() button.MouseButton1Click:Fire() end)
-end
-
-local mailRunning = false
-MailSendBtn.MouseButton1Click:Connect(function()
-	if mailRunning then
-		MailStatus.Text = "Already running!"
-		return
-	end
-	local username = MailUserBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
-	local itemName = MailItemBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
-	local qty = math.floor(tonumber(MailQtyBox.Text) or 0)
-	if username == "" then MailStatus.Text = "Enter a username!"; return end
-	if itemName == "" then MailStatus.Text = "Enter an item name!"; return end
-	if qty <= 0 then MailStatus.Text = "Enter a quantity > 0!"; return end
-
-	mailRunning = true
-	MailSendBtn.Text = "Sending..."
-	MailSendBtn.BackgroundColor3 = Color3.fromRGB(100,100,100)
-
-	task.spawn(function()
-		local function setMS(t, ok)
-			MailStatus.Text = t
-			MailStatus.TextColor3 = ok and Color3.fromRGB(150,200,160) or Color3.fromRGB(230,170,100)
-		end
-
-		-- Fire the mailbox proximity prompt
-		local mailboxPrompt
-		pcall(function()
-			mailboxPrompt = workspace.Gardens.Plot1.Signs.GreyMailBox.ProximityPromptPart.MailboxPrompt
-		end)
-		if not mailboxPrompt then
-			-- Try broader search
-			pcall(function()
-				for _, d in ipairs(workspace:GetDescendants()) do
-					if d:IsA("ProximityPrompt") and d.Name:lower():find("mailbox") then
-						mailboxPrompt = d; break
-					end
-				end
-			end)
-		end
-		if not mailboxPrompt then
-			setMS("Mailbox prompt not found!", false)
-			mailRunning = false
-			MailSendBtn.Text = "Send Mail"
-			MailSendBtn.BackgroundColor3 = Color3.fromRGB(50,130,170)
-			return
-		end
-
-		setMS("Opening mailbox...", true)
-		pcall(function() fireproximityprompt(mailboxPrompt) end)
-		task.wait(0.5)
-
-		local mailboxUI = PlayerGui:WaitForChild("MailboxUI", 5)
-		if not mailboxUI then
-			setMS("MailboxUI did not open!", false)
-			mailRunning = false
-			MailSendBtn.Text = "Send Mail"
-			MailSendBtn.BackgroundColor3 = Color3.fromRGB(50,130,170)
-			return
-		end
-
-		local mainFrame     = mailboxUI:WaitForChild("Frame", 5)
-		local sendingFrame  = mainFrame and mainFrame:WaitForChild("SendingFrame", 5)
-		local selFrame      = sendingFrame and sendingFrame:WaitForChild("SelectPlayerFrame", 5)
-		local topbar        = selFrame and selFrame:WaitForChild("Topbar", 5)
-		local searchBox     = topbar and topbar:WaitForChild("SearchBox", 5)
-
-		if not searchBox then
-			setMS("Could not find mailbox search box!", false)
-			mailRunning = false
-			MailSendBtn.Text = "Send Mail"
-			MailSendBtn.BackgroundColor3 = Color3.fromRGB(50,130,170)
-			return
-		end
-
-		-- Type username and search
-		setMS("Searching for " .. username .. "...", true)
-		searchBox:CaptureFocus()
-		searchBox.Text = username
-		task.wait(0.05)
-		searchBox:ReleaseFocus()
-		task.wait(0.05)
-		VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
-		task.wait(0.4)
-
-		-- Find and click the player in list
-		local playerList = selFrame:WaitForChild("PlayerList", 5)
-		local found = false
-		local deadline = tick() + 4
-		while not found and tick() < deadline do
-			for _, frame in ipairs(playerList:GetChildren()) do
-				if frame:IsA("Frame") then
-					local btn = frame:FindFirstChild("Button")
-					local lbl = btn and btn:FindFirstChild("PlayerUsername")
-					if lbl then
-						local clean = lbl.Text:lower():gsub("^@", "")
-						if clean == username:lower() then
-							clickMailBtn(btn)
-							found = true; break
+local function findMailboxPrompt()
+	local gardens = Workspace:FindFirstChild("Gardens")
+	if gardens then
+		for _,plot in ipairs(gardens:GetChildren()) do
+			local signs = plot:FindFirstChild("Signs")
+			if signs then
+				for _,mbName in ipairs({"GreyMailBox","MailBox","Mailbox"}) do
+					local mb = signs:FindFirstChild(mbName)
+					if mb then
+						local part = mb:FindFirstChild("ProximityPromptPart") or mb.PrimaryPart
+						if part then
+							local pr = part:FindFirstChild("MailboxPrompt") or part:FindFirstChildOfClass("ProximityPrompt")
+							if pr then return pr end
 						end
 					end
 				end
 			end
-			if not found then task.wait(0.05) end
 		end
-
-		if not found then
-			setMS("Player '" .. username .. "' not found in server!", false)
-			mailRunning = false
-			MailSendBtn.Text = "Send Mail"
-			MailSendBtn.BackgroundColor3 = Color3.fromRGB(50,130,170)
-			return
+	end
+	for _,d in ipairs(Workspace:GetDescendants()) do
+		if d:IsA("ProximityPrompt") and (tostring(d.Name)..tostring(d.ActionText)..tostring(d.ObjectText)):lower():find("mail") then
+			return d
 		end
+	end
+end
 
-		task.wait(0.3)
+local function openMailbox()
+	-- if already open and valid, reuse
+	if Mail.ui and Mail.ui.Parent then return Mail.ui end
+	-- close stale
+	local old=PlayerGui:FindFirstChild("MailboxUI")
+	if old then
+		local c=old:FindFirstChild("CloseButton",true)
+		if c then pcall(function() if firesignal then firesignal(c.MouseButton1Click) end end) end
+		task.wait(0.1)
+	end
+	local prompt=findMailboxPrompt(); if not prompt then return nil,"Mailbox prompt not found" end
+	pcall(function() fireproximityprompt(prompt) end); task.wait(0.4)
+	local ui=PlayerGui:WaitForChild("MailboxUI",5); if not ui then return nil,"MailboxUI didn't open" end
+	local f=ui:WaitForChild("Frame",5); if not f then return nil,"MailboxUI.Frame missing" end
+	Mail.ui=ui
+	Mail.sendingFrame = f:WaitForChild("SendingFrame",5)
+	return ui
+end
 
-		-- Find the item in InventoryFrame and click it qty times
-		local itemSendFrame  = sendingFrame:WaitForChild("ItemSendFrame", 5)
-		local scrollFrames   = itemSendFrame and itemSendFrame:WaitForChild("ScrollingFrames", 5)
-		local inventoryFrame = scrollFrames and scrollFrames:WaitForChild("InventoryFrame", 5)
-
-		if not inventoryFrame then
-			setMS("Could not find inventory frame!", false)
-			mailRunning = false
-			MailSendBtn.Text = "Send Mail"
-			MailSendBtn.BackgroundColor3 = Color3.fromRGB(50,130,170)
-			return
-		end
-
-		-- Build the prefix: Inv_Seeds:Bamboo, Inv_Pets:Raccoon, Inv_Crates:Bench Crate etc.
-		local prefix = "Inv_" .. mailItemType .. ":" .. itemName
-		local itemFrame = inventoryFrame:FindFirstChild(prefix)
-
-		if not itemFrame then
-			-- case-insensitive fallback
-			local needle = prefix:lower()
-			for _, c in ipairs(inventoryFrame:GetChildren()) do
-				if c.Name:lower() == needle then itemFrame = c; break end
+local function pickRecipient(username)
+	username = tostring(username or ""):gsub("^@",""):gsub("^%s+",""):gsub("%s+$","")
+	if username=="" then return false,"Empty recipient" end
+	local sel = Mail.sendingFrame and Mail.sendingFrame:WaitForChild("SelectPlayerFrame",5)
+	if not sel then return false,"SelectPlayerFrame missing" end
+	local topbar=sel:WaitForChild("Topbar",5); local searchBox=topbar and topbar:WaitForChild("SearchBox",5)
+	if not searchBox then return false,"SearchBox missing" end
+	pcall(function() searchBox:CaptureFocus() end); searchBox.Text=username; task.wait(0.05)
+	pcall(function() searchBox:ReleaseFocus() end); task.wait(0.05)
+	pcall(function() VirtualInputManager:SendKeyEvent(true,Enum.KeyCode.Return,false,game) end); task.wait(0.4)
+	local list=sel:WaitForChild("PlayerList",5); if not list then return false,"PlayerList missing" end
+	local found=false; local deadline=tick()+4
+	while not found and tick()<deadline do
+		for _,row in ipairs(list:GetChildren()) do
+			if row:IsA("Frame") then
+				local btn=row:FindFirstChild("Button")
+				local lbl=btn and btn:FindFirstChild("PlayerUsername")
+				if lbl then
+					local clean=lbl.Text:lower():gsub("^@","")
+					if clean==username:lower() then clickBtn(btn); found=true; break end
+				end
 			end
 		end
+		if not found then task.wait(0.08) end
+	end
+	if not found then return false,"'"..username.."' not in server" end
+	task.wait(0.3)
+	Mail.itemSendFrame = Mail.sendingFrame:WaitForChild("ItemSendFrame",5)
+	local scrolls = Mail.itemSendFrame and Mail.itemSendFrame:WaitForChild("ScrollingFrames",5)
+	Mail.inventoryFrame = scrolls and scrolls:WaitForChild("InventoryFrame",5)
+	if not Mail.inventoryFrame then return false,"InventoryFrame missing" end
+	Mail.recipientLocked=true; Mail.recipient=username
+	return true,"Connected to "..username
+end
 
-		if not itemFrame then
-			setMS("Item '" .. itemName .. "' not found in mailbox inventory!", false)
-			mailRunning = false
-			MailSendBtn.Text = "Send Mail"
-			MailSendBtn.BackgroundColor3 = Color3.fromRGB(50,130,170)
-			return
+local function readInventory()
+	-- returns { Seeds={{name,frame,count},...}, Pets={...}, Crates={...}, Gears={...} }
+	local out = { Seeds={}, Pets={}, Crates={}, Gears={} }
+	if not Mail.inventoryFrame or not Mail.inventoryFrame.Parent then return out end
+
+	local function readCount(itemFrame)
+		-- Look for a Count/Amount label, fall back to nil (unknown)
+		local lbl = itemFrame:FindFirstChild("Count",true) or itemFrame:FindFirstChild("Amount",true)
+		if lbl and lbl:IsA("TextLabel") then
+			local n = tonumber(lbl.Text:match("%d+"))
+			if n then return n end
 		end
+		return nil
+	end
 
-		-- Find the clickable button inside the item frame
-		local innerFrame = itemFrame:FindFirstChildWhichIsA("Frame") or itemFrame
-		local itemBtn    = innerFrame:FindFirstChildWhichIsA("GuiButton")
-			or itemFrame:FindFirstChildWhichIsA("GuiButton", true)
-
-		if not itemBtn then
-			setMS("Could not find button inside item frame!", false)
-			mailRunning = false
-			MailSendBtn.Text = "Send Mail"
-			MailSendBtn.BackgroundColor3 = Color3.fromRGB(50,130,170)
-			return
-		end
-
-		setMS(("Clicking %s x%d..."):format(itemName, qty), true)
-		for i = 1, qty do
-			if not itemBtn or not itemBtn.Parent then break end
-			clickMailBtn(itemBtn)
-			if i % 100 == 0 then
-				setMS(("Clicked %d / %d..."):format(i, qty), true)
-				task.wait() -- yield every 100 to avoid freezing
-			end
-		end
-
-		task.wait(0.2)
-
-		-- Click Send
-		local sendBtn = itemSendFrame:FindFirstChild("SendButton", true)
-		if sendBtn and sendBtn:IsA("GuiButton") then
-			clickMailBtn(sendBtn)
-			setMS(("Sent %d x %s to %s!"):format(qty, itemName, username), true)
+	for _,child in ipairs(Mail.inventoryFrame:GetChildren()) do
+		local cname = child.Name
+		if cname:sub(1,#INV_PREFIX.Seeds) == INV_PREFIX.Seeds then
+			table.insert(out.Seeds, { name=cname:sub(#INV_PREFIX.Seeds+1), frame=child, count=readCount(child) })
+		elseif cname:sub(1,#INV_PREFIX.Pets) == INV_PREFIX.Pets then
+			table.insert(out.Pets, { name=cname:sub(#INV_PREFIX.Pets+1), frame=child, count=readCount(child) })
+		elseif cname:sub(1,#INV_PREFIX.Crates) == INV_PREFIX.Crates then
+			table.insert(out.Crates, { name=cname:sub(#INV_PREFIX.Crates+1), frame=child, count=readCount(child) })
 		else
-			setMS("Items queued but Send button not found!", false)
+			for _,gp in ipairs(GEAR_PREFIXES) do
+				if cname:sub(1,#gp) == gp then
+					table.insert(out.Gears, { name=cname:sub(#gp+1), frame=child, count=readCount(child) })
+					break
+				end
+			end
 		end
-
-		mailRunning = false
-		MailSendBtn.Text = "Send Mail"
-		MailSendBtn.BackgroundColor3 = Color3.fromRGB(50,130,170)
-	end)
-end)
-
-local Bot = mk("Frame", { Size = UDim2.new(1, 0, 0, 110), LayoutOrder = 4,
-	BackgroundTransparency = 1, Parent = Main })
-local function mkBtn(text, sizeScale, posScale, color)
-	local b = mk("TextButton", {
-		Size = UDim2.new(sizeScale, -4, 0, 38),
-		Position = UDim2.new(posScale, 0, 0, 0),
-		BackgroundColor3 = color, Text = text,
-		Font = Enum.Font.GothamBold, TextSize = 14,
-		TextColor3 = Color3.fromRGB(255,255,255), Parent = Bot,
-	})
-	mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = b }); return b
+	end
+	for _,bucket in pairs(out) do table.sort(bucket, function(a,b) return a.name<b.name end) end
+	return out
 end
-local SellSel = mkBtn("Sell Selected", 0.5, 0, Color3.fromRGB(60,140,80))
-local SellAll = mkBtn("Sell ALL", 0.5, 0.5, Color3.fromRGB(140,100,50))
-local Refresh = mk("TextButton", { Size = UDim2.new(0.33, -4, 0, 34), Position = UDim2.new(0, 0, 0, 42),
-	BackgroundColor3 = Color3.fromRGB(50,80,130), Text = "Refresh",
-	Font = Enum.Font.GothamBold, TextSize = 13,
-	TextColor3 = Color3.fromRGB(255,255,255), Parent = Bot })
-mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = Refresh })
-local TpBack = mk("TextButton", { Size = UDim2.new(0.33, -4, 0, 34), Position = UDim2.new(0.335, 0, 0, 42),
-	BackgroundColor3 = Color3.fromRGB(80,130,110), Text = "TP-Back: ON",
-	Font = Enum.Font.GothamBold, TextSize = 13,
-	TextColor3 = Color3.fromRGB(255,255,255), Parent = Bot })
-mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = TpBack })
-local SelAllBtn = mk("TextButton", { Size = UDim2.new(0.34, -4, 0, 34), Position = UDim2.new(0.67, 0, 0, 42),
-	BackgroundColor3 = Color3.fromRGB(70,90,70), Text = "Select All Max",
-	Font = Enum.Font.GothamBold, TextSize = 13,
-	TextColor3 = Color3.fromRGB(255,255,255), Parent = Bot })
-mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = SelAllBtn })
 
-local Status = mk("TextLabel", { Size = UDim2.new(1, 0, 0, 28), Position = UDim2.new(0, 0, 0, 80),
-	BackgroundTransparency = 1, Text = "", Font = Enum.Font.Gotham, TextSize = 13,
-	TextColor3 = Color3.fromRGB(150,200,160), TextXAlignment = Enum.TextXAlignment.Left,
-	TextWrapped = true, Parent = Bot })
-local function setStatus(t, ok)
-	Status.Text = t
-	Status.TextColor3 = ok and Color3.fromRGB(150,200,160) or Color3.fromRGB(230,170,100)
+local function clickInventoryItem(itemFrame)
+	if not itemFrame or not itemFrame.Parent then return false end
+	local inner = itemFrame:FindFirstChildWhichIsA("Frame") or itemFrame
+	local b = inner:FindFirstChildWhichIsA("GuiButton")
+	if not b then for _,d in ipairs(itemFrame:GetDescendants()) do if d:IsA("GuiButton") then b=d; break end end end
+	if b then clickBtn(b); return true end
+	return false
 end
+
+local function sendMailPlan(plan)
+	-- plan: { {entry, count}, ... }
+	if not Mail.inventoryFrame then return false,"Mailbox not connected" end
+	local total,clicked = 0,0
+	for _,p in ipairs(plan) do total = total + p.count end
+	if total==0 then return false,"Pick at least one amount > 0" end
+	for _,p in ipairs(plan) do
+		for i=1,p.count do
+			if not p.entry.frame.Parent then break end
+			if not clickInventoryItem(p.entry.frame) then break end
+			clicked = clicked + 1
+			if i % 50 == 0 then task.wait() end
+		end
+	end
+	task.wait(0.4)
+	local sendBtn = Mail.itemSendFrame:FindFirstChild("SendButton",true)
+	if sendBtn and sendBtn:IsA("GuiButton") then clickBtn(sendBtn) else return false,"SendButton missing" end
+	return true, ("Sent %d clicks to %s"):format(clicked, Mail.recipient)
+end
+
+-- ============ GUI ============
+local old=(CoreGui:FindFirstChild("GAG2AS")) or (PlayerGui:FindFirstChild("GAG2AS")); if old then old:Destroy() end
+local parent=CoreGui; if not pcall(function() return CoreGui.Name end) then parent=PlayerGui end
+local Gui=Instance.new("ScreenGui"); Gui.Name="GAG2AS"; Gui.ResetOnSpawn=false; Gui.IgnoreGuiInset=true; Gui.Parent=parent
+local function mk(c,p) local i=Instance.new(c); for k,v in pairs(p) do i[k]=v end; return i end
+
+local TH={ bg=Color3.fromRGB(16,22,19),panel=Color3.fromRGB(22,30,25),row=Color3.fromRGB(28,38,32),
+	stroke=Color3.fromRGB(70,160,100),accent=Color3.fromRGB(110,220,140),accentDim=Color3.fromRGB(60,140,80),
+	warn=Color3.fromRGB(220,140,60),danger=Color3.fromRGB(200,70,70),mail=Color3.fromRGB(80,150,220),
+	mailDim=Color3.fromRGB(50,100,160),text=Color3.fromRGB(235,240,235),subtext=Color3.fromRGB(160,180,165),
+	input=Color3.fromRGB(40,52,44) }
+
+local Main=mk("Frame",{ AnchorPoint=Vector2.new(0.5,0.5),Position=UDim2.new(0.5,0,0.5,0),
+	Size=UDim2.new(0.92,0,0.88,0),BackgroundColor3=TH.bg,BorderSizePixel=0,Parent=Gui,Active=true })
+mk("UISizeConstraint",{MaxSize=Vector2.new(500,760),MinSize=Vector2.new(300,420),Parent=Main})
+mk("UICorner",{CornerRadius=UDim.new(0,14),Parent=Main})
+mk("UIStroke",{Color=TH.stroke,Thickness=1.5,Transparency=0.35,Parent=Main})
+mk("UIGradient",{Rotation=90,Color=ColorSequence.new{ColorSequenceKeypoint.new(0,Color3.fromRGB(24,32,28)),ColorSequenceKeypoint.new(1,Color3.fromRGB(14,20,17))},Parent=Main})
+mk("UIPadding",{PaddingTop=UDim.new(0,10),PaddingBottom=UDim.new(0,10),PaddingLeft=UDim.new(0,10),PaddingRight=UDim.new(0,10),Parent=Main})
+mk("UIListLayout",{Padding=UDim.new(0,8),SortOrder=Enum.SortOrder.LayoutOrder,Parent=Main})
+
+local Bar=mk("Frame",{Size=UDim2.new(1,0,0,46),LayoutOrder=1,BackgroundColor3=TH.panel,BorderSizePixel=0,Parent=Main})
+mk("UICorner",{CornerRadius=UDim.new(0,10),Parent=Bar}); mk("UIStroke",{Color=TH.stroke,Thickness=1,Transparency=0.6,Parent=Bar})
+mk("TextLabel",{Size=UDim2.new(1,-100,1,0),Position=UDim2.new(0,14,0,0),BackgroundTransparency=1,
+	Text="GAG2 Auto Suite  v9",Font=Enum.Font.GothamBlack,TextSize=17,TextColor3=TH.text,
+	TextXAlignment=Enum.TextXAlignment.Left,Parent=Bar})
+local Mini=mk("TextButton",{Size=UDim2.new(0,38,0,34),Position=UDim2.new(1,-86,0.5,-17),BackgroundColor3=Color3.fromRGB(70,110,80),Text="—",Font=Enum.Font.GothamBold,TextSize=18,TextColor3=TH.text,Parent=Bar})
+mk("UICorner",{CornerRadius=UDim.new(0,8),Parent=Mini})
+local Close=mk("TextButton",{Size=UDim2.new(0,38,0,34),Position=UDim2.new(1,-44,0.5,-17),BackgroundColor3=TH.danger,Text="X",Font=Enum.Font.GothamBold,TextSize=16,TextColor3=TH.text,Parent=Bar})
+mk("UICorner",{CornerRadius=UDim.new(0,8),Parent=Close})
+
+local Tabs=mk("Frame",{Size=UDim2.new(1,0,0,38),LayoutOrder=2,BackgroundTransparency=1,Parent=Main})
+mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,6),SortOrder=Enum.SortOrder.LayoutOrder,Parent=Tabs})
+local function mkTab(label,order)
+	local b=mk("TextButton",{Size=UDim2.new(1/3,-4,1,0),BackgroundColor3=TH.panel,Text=label,
+		Font=Enum.Font.GothamBold,TextSize=14,TextColor3=TH.subtext,LayoutOrder=order,Parent=Tabs,AutoButtonColor=false})
+	mk("UICorner",{CornerRadius=UDim.new(0,8),Parent=b}); return b
+end
+local PetsTab=mkTab("Pets",1); local SeedsTab=mkTab("Seeds",2); local MailTab=mkTab("Mail",3)
+
+-- ===== Mail header =====
+local MailHeader=mk("Frame",{Size=UDim2.new(1,0,0,118),LayoutOrder=3,BackgroundColor3=TH.panel,BorderSizePixel=0,Parent=Main,Visible=false})
+mk("UICorner",{CornerRadius=UDim.new(0,10),Parent=MailHeader})
+mk("UIStroke",{Color=TH.mail,Thickness=1,Transparency=0.5,Parent=MailHeader})
+mk("UIPadding",{PaddingTop=UDim.new(0,8),PaddingBottom=UDim.new(0,8),PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,12),Parent=MailHeader})
+
+mk("TextLabel",{Size=UDim2.new(1,0,0,14),BackgroundTransparency=1,Text="RECIPIENT USERNAME",
+	Font=Enum.Font.GothamBold,TextSize=10,TextColor3=TH.mail,TextXAlignment=Enum.TextXAlignment.Left,Parent=MailHeader})
+local RecipientBox=mk("TextBox",{Size=UDim2.new(1,-110,0,32),Position=UDim2.new(0,0,0,18),
+	BackgroundColor3=TH.input,PlaceholderText="e.g. Roblox",Text="",Font=Enum.Font.GothamMedium,TextSize=14,
+	TextColor3=TH.text,PlaceholderColor3=TH.subtext,ClearTextOnFocus=false,Parent=MailHeader,TextXAlignment=Enum.TextXAlignment.Left})
+mk("UICorner",{CornerRadius=UDim.new(0,6),Parent=RecipientBox}); mk("UIStroke",{Color=TH.mail,Thickness=1,Transparency=0.5,Parent=RecipientBox})
+mk("UIPadding",{PaddingLeft=UDim.new(0,10),PaddingRight=UDim.new(0,10),Parent=RecipientBox})
+local ConnectBtn=mk("TextButton",{Size=UDim2.new(0,100,0,32),Position=UDim2.new(1,-100,0,18),
+	BackgroundColor3=TH.mailDim,Text="Connect",Font=Enum.Font.GothamBold,TextSize=13,TextColor3=TH.text,Parent=MailHeader})
+mk("UICorner",{CornerRadius=UDim.new(0,6),Parent=ConnectBtn})
+
+local MailStatus=mk("TextLabel",{Size=UDim2.new(1,0,0,16),Position=UDim2.new(0,0,0,54),BackgroundTransparency=1,
+	Text="Type a recipient and press Connect to load mailable items.",Font=Enum.Font.Gotham,TextSize=11,
+	TextColor3=TH.subtext,TextXAlignment=Enum.TextXAlignment.Left,TextWrapped=true,Parent=MailHeader})
+
+local SubTabs=mk("Frame",{Size=UDim2.new(1,0,0,32),Position=UDim2.new(0,0,0,76),BackgroundTransparency=1,Parent=MailHeader})
+mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,4),SortOrder=Enum.SortOrder.LayoutOrder,Parent=SubTabs})
+local function mkSub(label,order)
+	local b=mk("TextButton",{Size=UDim2.new(0.25,-3,1,0),BackgroundColor3=TH.row,Text=label,
+		Font=Enum.Font.GothamBold,TextSize=12,TextColor3=TH.subtext,LayoutOrder=order,Parent=SubTabs,AutoButtonColor=false})
+	mk("UICorner",{CornerRadius=UDim.new(0,6),Parent=b}); return b
+end
+local SeedsBtn=mkSub("Seeds",1); local PetsBtn=mkSub("Pets",2); local CratesBtn=mkSub("Crates",3); local GearsBtn=mkSub("Gears",4)
+
+-- ===== List =====
+local List=mk("ScrollingFrame",{Size=UDim2.new(1,0,1,-200),LayoutOrder=4,BackgroundColor3=TH.panel,
+	BorderSizePixel=0,CanvasSize=UDim2.new(0,0,0,0),ScrollBarThickness=6,ScrollBarImageColor3=TH.accent,Parent=Main})
+mk("UICorner",{CornerRadius=UDim.new(0,10),Parent=List})
+local ListLayout=mk("UIListLayout",{Padding=UDim.new(0,5),SortOrder=Enum.SortOrder.LayoutOrder,Parent=List})
+mk("UIPadding",{PaddingTop=UDim.new(0,6),PaddingBottom=UDim.new(0,6),PaddingLeft=UDim.new(0,6),PaddingRight=UDim.new(0,6),Parent=List})
+
+-- ===== Bottom controls =====
+local Bot=mk("Frame",{Size=UDim2.new(1,0,0,120),LayoutOrder=5,BackgroundTransparency=1,Parent=Main})
+local function mkAct(p) local b=mk("TextButton",p); mk("UICorner",{CornerRadius=UDim.new(0,8),Parent=b}); return b end
+local SellSel=mkAct({Size=UDim2.new(0.5,-4,0,42),Position=UDim2.new(0,0,0,0),BackgroundColor3=TH.accentDim,Text="Sell Selected",Font=Enum.Font.GothamBold,TextSize=14,TextColor3=TH.text,Parent=Bot})
+local SellAll=mkAct({Size=UDim2.new(0.5,-4,0,42),Position=UDim2.new(0.5,4,0,0),BackgroundColor3=TH.warn,Text="Sell ALL",Font=Enum.Font.GothamBold,TextSize=14,TextColor3=TH.text,Parent=Bot})
+local MailSendAll=mkAct({Size=UDim2.new(1,0,0,42),Position=UDim2.new(0,0,0,0),BackgroundColor3=TH.mailDim,Text="Send Mail",Font=Enum.Font.GothamBold,TextSize=15,TextColor3=TH.text,Parent=Bot,Visible=false})
+local Refresh=mkAct({Size=UDim2.new(0.33,-4,0,34),Position=UDim2.new(0,0,0,46),BackgroundColor3=Color3.fromRGB(50,80,130),Text="Refresh",Font=Enum.Font.GothamBold,TextSize=12,TextColor3=TH.text,Parent=Bot})
+local TpBack=mkAct({Size=UDim2.new(0.33,-4,0,46),Position=UDim2.new(0.335,0,0,46),BackgroundColor3=Color3.fromRGB(80,130,110),Text="TP-Back: ON",Font=Enum.Font.GothamBold,TextSize=12,TextColor3=TH.text,Parent=Bot})
+local SelAllBtn=mkAct({Size=UDim2.new(0.34,-4,0,34),Position=UDim2.new(0.67,0,0,46),BackgroundColor3=Color3.fromRGB(70,90,70),Text="Select All Max",Font=Enum.Font.GothamBold,TextSize=12,TextColor3=TH.text,Parent=Bot})
+local Status=mk("TextLabel",{Size=UDim2.new(1,0,0,28),Position=UDim2.new(0,0,0,86),BackgroundTransparency=1,Text="",Font=Enum.Font.Gotham,TextSize=12,TextColor3=TH.accent,TextXAlignment=Enum.TextXAlignment.Left,TextWrapped=true,Parent=Bot})
+local function setStatus(t,ok) Status.Text=t; Status.TextColor3=(ok==false) and TH.warn or TH.accent end
+local function setMailMsg(t,ok) MailStatus.Text=t; MailStatus.TextColor3=(ok==false) and TH.warn or TH.subtext end
 
 local refresh
 
-local function buildRow(group)
-	local key = group.name
-	local rarity = group.rarity or "Common"
-	local color = RARITY_COLOR[rarity] or Color3.fromRGB(190,190,190)
-
-	local r = mk("Frame", { Size = UDim2.new(1, -10, 0, 46),
-		BackgroundColor3 = Color3.fromRGB(30,40,32), BorderSizePixel = 0, Parent = List })
-	mk("UICorner", { CornerRadius = UDim.new(0, 6), Parent = r })
-	mk("UIStroke", { Color = color, Thickness = 1, Transparency = 0.6, Parent = r })
-
-	mk("TextLabel", { Size = UDim2.new(0.45, 0, 1, 0), Position = UDim2.new(0, 10, 0, 0),
-		BackgroundTransparency = 1, Text = ("%s x%d"):format(group.name, group.count),
-		Font = Enum.Font.GothamBold, TextSize = 14,
-		TextColor3 = Color3.fromRGB(235,235,235),
-		TextXAlignment = Enum.TextXAlignment.Left, Parent = r })
-
-	mk("TextLabel", { Size = UDim2.new(0.2, 0, 0, 18), Position = UDim2.new(0.45, 0, 0.5, -9),
-		BackgroundTransparency = 1, Text = rarity, Font = Enum.Font.GothamMedium,
-		TextSize = 12, TextColor3 = color,
-		TextXAlignment = Enum.TextXAlignment.Center, Parent = r })
-
-	local qty = SelectedQty[CurrentTab][key] or 0
-	local box = mk("TextBox", {
-		Size = UDim2.new(0, 64, 0, 30), Position = UDim2.new(1, -150, 0.5, -15),
-		BackgroundColor3 = Color3.fromRGB(50,60,52),
-		Text = tostring(qty), PlaceholderText = "0",
-		Font = Enum.Font.GothamBold, TextSize = 14,
-		TextColor3 = Color3.fromRGB(255,255,255),
-		ClearTextOnFocus = false, Parent = r,
-	})
-	mk("UICorner", { CornerRadius = UDim.new(0, 5), Parent = box })
-	mk("UIStroke", { Color = Color3.fromRGB(80,180,110), Thickness = 1, Transparency = 0.5, Parent = box })
-
-	local maxBtn = mk("TextButton", {
-		Size = UDim2.new(0, 36, 0, 30), Position = UDim2.new(1, -82, 0.5, -15),
-		BackgroundColor3 = Color3.fromRGB(60,100,70),
-		Text = "MAX", Font = Enum.Font.GothamBold, TextSize = 11,
-		TextColor3 = Color3.fromRGB(255,255,255), Parent = r,
-	})
-	mk("UICorner", { CornerRadius = UDim.new(0, 5), Parent = maxBtn })
-
-	local rowSell = mk("TextButton", {
-		Size = UDim2.new(0, 38, 0, 30), Position = UDim2.new(1, -42, 0.5, -15),
-		BackgroundColor3 = Color3.fromRGB(60,140,80),
-		Text = "Sell", Font = Enum.Font.GothamBold, TextSize = 12,
-		TextColor3 = Color3.fromRGB(255,255,255), Parent = r,
-	})
-	mk("UICorner", { CornerRadius = UDim.new(0, 5), Parent = rowSell })
-
-	local function clampQty(n)
-		n = tonumber(n) or 0
-		if n < 0 then n = 0 end
-		if n > group.count then n = group.count end
-		return math.floor(n)
-	end
-
-	box.FocusLost:Connect(function()
-		local n = clampQty(box.Text); box.Text = tostring(n)
-		SelectedQty[CurrentTab][key] = n > 0 and n or nil
-	end)
-	maxBtn.MouseButton1Click:Connect(function()
-		box.Text = tostring(group.count)
-		SelectedQty[CurrentTab][key] = group.count
-	end)
-	rowSell.MouseButton1Click:Connect(function()
-		local n = clampQty(box.Text)
-		if n <= 0 then setStatus("Enter quantity first", false) return end
-		SelectedQty[CurrentTab][key] = n
-		setStatus(("Selling %d %s..."):format(n, group.name), true)
+-- ===== Row builders =====
+local function buildSellRow(group)
+	local key=group.name; local color=RARITY_COLOR[group.rarity] or RARITY_COLOR.Other
+	local r=mk("Frame",{Size=UDim2.new(1,-8,0,46),BackgroundColor3=TH.row,BorderSizePixel=0,Parent=List})
+	mk("UICorner",{CornerRadius=UDim.new(0,6),Parent=r}); mk("UIStroke",{Color=color,Thickness=1,Transparency=0.6,Parent=r})
+	mk("TextLabel",{Size=UDim2.new(0.45,0,1,0),Position=UDim2.new(0,10,0,0),BackgroundTransparency=1,
+		Text=("%s x%d"):format(group.name,group.count),Font=Enum.Font.GothamBold,TextSize=13,
+		TextColor3=TH.text,TextXAlignment=Enum.TextXAlignment.Left,Parent=r})
+	mk("TextLabel",{Size=UDim2.new(0.2,0,0,16),Position=UDim2.new(0.45,0,0.5,-8),BackgroundTransparency=1,
+		Text=group.rarity,Font=Enum.Font.GothamMedium,TextSize=11,TextColor3=color,Parent=r})
+	local qty=SelectedQty[CurrentTab][key] or 0
+	local box=mk("TextBox",{Size=UDim2.new(0,64,0,30),Position=UDim2.new(1,-150,0.5,-15),BackgroundColor3=TH.input,
+		Text=tostring(qty),PlaceholderText="0",Font=Enum.Font.GothamBold,TextSize=13,TextColor3=TH.text,
+		ClearTextOnFocus=false,Parent=r,PlaceholderColor3=TH.subtext})
+	mk("UICorner",{CornerRadius=UDim.new(0,5),Parent=box})
+	local maxB=mk("TextButton",{Size=UDim2.new(0,36,0,30),Position=UDim2.new(1,-82,0.5,-15),BackgroundColor3=Color3.fromRGB(60,100,70),Text="MAX",Font=Enum.Font.GothamBold,TextSize=10,TextColor3=TH.text,Parent=r})
+	mk("UICorner",{CornerRadius=UDim.new(0,5),Parent=maxB})
+	local sellB=mk("TextButton",{Size=UDim2.new(0,38,0,30),Position=UDim2.new(1,-42,0.5,-15),BackgroundColor3=TH.accentDim,Text="Sell",Font=Enum.Font.GothamBold,TextSize=12,TextColor3=TH.text,Parent=r})
+	mk("UICorner",{CornerRadius=UDim.new(0,5),Parent=sellB})
+	local function clamp(n) n=tonumber(n) or 0; if n<0 then n=0 end; if n>group.count then n=group.count end; return math.floor(n) end
+	box.FocusLost:Connect(function() local n=clamp(box.Text); box.Text=tostring(n); SelectedQty[CurrentTab][key]=n>0 and n or nil end)
+	maxB.MouseButton1Click:Connect(function() box.Text=tostring(group.count); SelectedQty[CurrentTab][key]=group.count end)
+	sellB.MouseButton1Click:Connect(function()
+		local n=clamp(box.Text); if n<=0 then setStatus("Enter quantity first",false) return end
+		setStatus(("Selling %d %s..."):format(n,group.name),true)
 		task.spawn(function()
-			local needTP = true
-			local _, hrp = getSellPrompt()
-			local myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-			if hrp and myHRP and (hrp.Position - myHRP.Position).Magnitude < 8 then needTP = false end
-			if needTP then teleportToSteven(); task.wait(0.15) end
-			local sold, fail = 0, 0
-			for i = 1, n do
-				local tool = group.tools[i]
-				if tool and tool.Parent then
-					if sellOneTool(tool) then sold = sold + 1 else fail = fail + 1 end
-					task.wait(0.1)
-				end
-			end
-			if CFG.TeleportBack and needTP then returnHome() end
-			SelectedQty[CurrentTab][key] = nil
-			setStatus(("Sold %d / %d (%d failed)"):format(sold, n, fail), fail == 0)
-			refresh()
+			local need=true; local _,hrp=getSellPrompt()
+			local myHRP=LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+			if hrp and myHRP and (hrp.Position-myHRP.Position).Magnitude<8 then need=false end
+			if need then teleportToSteven(); task.wait(0.15) end
+			local sold,fail=0,0
+			for i=1,n do local t=group.tools[i]; if t and t.Parent then if sellOneTool(t) then sold=sold+1 else fail=fail+1 end; task.wait(0.1) end end
+			if CFG.TeleportBack and need then returnHome() end
+			SelectedQty[CurrentTab][key]=nil
+			setStatus(("Sold %d / %d (%d failed)"):format(sold,n,fail),fail==0); refresh()
+		end)
+	end)
+end
+
+local function buildMailRow(entry)
+	local bucketKey = "Mail"..MailSubTab
+	local key = entry.name
+	local color = (MailSubTab=="Pets" and (PET_RARITY[entry.name] and RARITY_COLOR[PET_RARITY[entry.name]]))
+		or (MailSubTab=="Seeds" and (SEED_RARITY[entry.name] and RARITY_COLOR[SEED_RARITY[entry.name]]))
+		or (MailSubTab=="Crates" and RARITY_COLOR.Crate)
+		or RARITY_COLOR.Gear
+	local r=mk("Frame",{Size=UDim2.new(1,-8,0,46),BackgroundColor3=TH.row,BorderSizePixel=0,Parent=List})
+	mk("UICorner",{CornerRadius=UDim.new(0,6),Parent=r}); mk("UIStroke",{Color=color,Thickness=1,Transparency=0.6,Parent=r})
+	local label = entry.name .. (entry.count and (" x"..entry.count) or "")
+	mk("TextLabel",{Size=UDim2.new(0.6,0,1,0),Position=UDim2.new(0,10,0,0),BackgroundTransparency=1,
+		Text=label,Font=Enum.Font.GothamBold,TextSize=13,TextColor3=TH.text,TextXAlignment=Enum.TextXAlignment.Left,Parent=r})
+	local qty=SelectedQty[bucketKey][key] or 0
+	local box=mk("TextBox",{Size=UDim2.new(0,64,0,30),Position=UDim2.new(1,-150,0.5,-15),BackgroundColor3=TH.input,
+		Text=tostring(qty),PlaceholderText="0",Font=Enum.Font.GothamBold,TextSize=13,TextColor3=TH.text,
+		ClearTextOnFocus=false,Parent=r,PlaceholderColor3=TH.subtext})
+	mk("UICorner",{CornerRadius=UDim.new(0,5),Parent=box})
+	local maxB=mk("TextButton",{Size=UDim2.new(0,36,0,30),Position=UDim2.new(1,-82,0.5,-15),BackgroundColor3=Color3.fromRGB(60,100,70),Text="MAX",Font=Enum.Font.GothamBold,TextSize=10,TextColor3=TH.text,Parent=r})
+	mk("UICorner",{CornerRadius=UDim.new(0,5),Parent=maxB})
+	local mailB=mk("TextButton",{Size=UDim2.new(0,40,0,30),Position=UDim2.new(1,-42,0.5,-15),BackgroundColor3=TH.mailDim,Text="Mail",Font=Enum.Font.GothamBold,TextSize=12,TextColor3=TH.text,Parent=r})
+	mk("UICorner",{CornerRadius=UDim.new(0,5),Parent=mailB})
+	local function clamp(n) n=tonumber(n) or 0; if n<0 then n=0 end; return math.floor(n) end
+	box.FocusLost:Connect(function() local n=clamp(box.Text); box.Text=tostring(n); SelectedQty[bucketKey][key]=n>0 and n or nil end)
+	maxB.MouseButton1Click:Connect(function() local v=entry.count or 999; box.Text=tostring(v); SelectedQty[bucketKey][key]=v end)
+	mailB.MouseButton1Click:Connect(function()
+		local n=clamp(box.Text); if n<=0 then setMailMsg("Enter quantity first",false) return end
+		setMailMsg(("Mailing %d × %s..."):format(n,entry.name),true)
+		task.spawn(function()
+			local ok,msg=sendMailPlan({{entry=entry,count=n}})
+			setMailMsg(tostring(msg),ok); SelectedQty[bucketKey][key]=nil
+			task.wait(0.6); refresh()
 		end)
 	end)
 end
 
 refresh = function()
-	for _, c in ipairs(List:GetChildren()) do
-		if not c:IsA("UIListLayout") and not c:IsA("UIPadding") then c:Destroy() end
-	end
-	local groups = scanGrouped(CurrentTab)
-	if #groups == 0 then
-		mk("TextLabel", { Size = UDim2.new(1, -12, 0, 60), BackgroundTransparency = 1,
-			Text = "No " .. CurrentTab:lower() .. " found.\nMake sure they are in your Backpack.",
-			Font = Enum.Font.Gotham, TextSize = 14, TextColor3 = Color3.fromRGB(180,180,180),
-			TextWrapped = true, Parent = List })
-		setStatus(("Scanned: 0 unique %s"):format(CurrentTab:lower()), false)
+	for _,c in ipairs(List:GetChildren()) do if not c:IsA("UIListLayout") and not c:IsA("UIPadding") then c:Destroy() end end
+	if CurrentTab=="Mail" then
+		if not Mail.recipientLocked then
+			mk("TextLabel",{Size=UDim2.new(1,-12,0,60),BackgroundTransparency=1,
+				Text="Connect to a recipient first.\nType a username above and press Connect.",
+				Font=Enum.Font.Gotham,TextSize=13,TextColor3=TH.subtext,TextWrapped=true,Parent=List})
+		else
+			local data = readInventory()
+			local bucket = data[MailSubTab] or {}
+			if #bucket==0 then
+				mk("TextLabel",{Size=UDim2.new(1,-12,0,60),BackgroundTransparency=1,
+					Text="No "..MailSubTab:lower().." in your backpack right now.",
+					Font=Enum.Font.Gotham,TextSize=13,TextColor3=TH.subtext,TextWrapped=true,Parent=List})
+			else
+				for _,e in ipairs(bucket) do buildMailRow(e) end
+			end
+			setStatus(("Mail • %s: %d items  →  %s"):format(MailSubTab,#bucket,Mail.recipient),true)
+		end
 	else
-		local total = 0
-		for _, g in ipairs(groups) do total = total + g.count; buildRow(g) end
-		setStatus(("%d unique %s (%d total)"):format(#groups, CurrentTab:lower(), total), true)
+		local groups=scanGrouped(CurrentTab)
+		if #groups==0 then
+			mk("TextLabel",{Size=UDim2.new(1,-12,0,60),BackgroundTransparency=1,
+				Text="No "..CurrentTab:lower().." in backpack.",Font=Enum.Font.Gotham,TextSize=13,
+				TextColor3=TH.subtext,TextWrapped=true,Parent=List})
+			setStatus("0 items",false)
+		else
+			local total=0; for _,g in ipairs(groups) do total=total+g.count; buildSellRow(g) end
+			setStatus(("%d unique • %d total"):format(#groups,total),true)
+		end
 	end
-	List.CanvasSize = UDim2.new(0, 0, 0, ListLayout.AbsoluteContentSize.Y + 12)
+	List.CanvasSize=UDim2.new(0,0,0,ListLayout.AbsoluteContentSize.Y+12)
+end
+
+local function paintSubTabs()
+	for btn,name in pairs({[SeedsBtn]="Seeds",[PetsBtn]="Pets",[CratesBtn]="Crates",[GearsBtn]="Gears"}) do
+		if name==MailSubTab then btn.BackgroundColor3=TH.mailDim; btn.TextColor3=TH.text
+		else btn.BackgroundColor3=TH.row; btn.TextColor3=TH.subtext end
+	end
 end
 
 local function setTab(t)
-	CurrentTab = t
-	local isMail = (t == "Mail")
-	PetsTab.BackgroundColor3  = t == "Pets"  and Color3.fromRGB(60,140,80) or Color3.fromRGB(35,50,38)
-	SeedsTab.BackgroundColor3 = t == "Seeds" and Color3.fromRGB(60,140,80) or Color3.fromRGB(35,50,38)
-	MailTab.BackgroundColor3  = isMail and Color3.fromRGB(50,130,170) or Color3.fromRGB(35,50,38)
-	List.Visible      = not isMail
-	Bot.Visible       = not isMail
-	MailPanel.Visible = isMail
-	if not isMail then refresh() end
+	CurrentTab=t
+	local mail = (t=="Mail")
+	for btn,name in pairs({[PetsTab]="Pets",[SeedsTab]="Seeds",[MailTab]="Mail"}) do
+		if name==t then btn.BackgroundColor3 = (name=="Mail") and TH.mailDim or TH.accentDim; btn.TextColor3=TH.text
+		else btn.BackgroundColor3=TH.panel; btn.TextColor3=TH.subtext end
+	end
+	MailHeader.Visible=mail; MailSendAll.Visible=mail; SellSel.Visible=not mail; SellAll.Visible=not mail
+	List.Size = mail and UDim2.new(1,0,1,-310) or UDim2.new(1,0,1,-200)
+	paintSubTabs(); refresh()
 end
+
 PetsTab.MouseButton1Click:Connect(function() setTab("Pets") end)
 SeedsTab.MouseButton1Click:Connect(function() setTab("Seeds") end)
 MailTab.MouseButton1Click:Connect(function() setTab("Mail") end)
+SeedsBtn.MouseButton1Click:Connect(function() MailSubTab="Seeds"; paintSubTabs(); refresh() end)
+PetsBtn.MouseButton1Click:Connect(function()  MailSubTab="Pets";  paintSubTabs(); refresh() end)
+CratesBtn.MouseButton1Click:Connect(function() MailSubTab="Crates"; paintSubTabs(); refresh() end)
+GearsBtn.MouseButton1Click:Connect(function() MailSubTab="Gears"; paintSubTabs(); refresh() end)
+
 Refresh.MouseButton1Click:Connect(refresh)
-TpBack.MouseButton1Click:Connect(function()
-	CFG.TeleportBack = not CFG.TeleportBack
-	TpBack.Text = "TP-Back: " .. (CFG.TeleportBack and "ON" or "OFF")
-end)
+TpBack.MouseButton1Click:Connect(function() CFG.TeleportBack=not CFG.TeleportBack; TpBack.Text="TP-Back: "..(CFG.TeleportBack and "ON" or "OFF") end)
 SelAllBtn.MouseButton1Click:Connect(function()
-	for _, g in ipairs(scanGrouped(CurrentTab)) do
-		SelectedQty[CurrentTab][g.name] = g.count
+	if CurrentTab=="Mail" and Mail.recipientLocked then
+		local data=readInventory(); local bucket=data[MailSubTab] or {}; local bk="Mail"..MailSubTab
+		for _,e in ipairs(bucket) do SelectedQty[bk][e.name]=e.count or 999 end
+	else
+		for _,g in ipairs(scanGrouped(CurrentTab)) do SelectedQty[CurrentTab][g.name]=g.count end
 	end
 	refresh()
 end)
 
-SellAll.MouseButton1Click:Connect(function()
-	setStatus("Selling entire inventory via Steven...", true)
+ConnectBtn.MouseButton1Click:Connect(function()
+	local u=RecipientBox.Text:gsub("^%s+",""):gsub("%s+$","")
+	if u=="" then setMailMsg("Type a username first",false) return end
+	setMailMsg("Opening mailbox...",true)
 	task.spawn(function()
-		local needTP = true
-		local _, hrp = getSellPrompt()
-		local myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-		if hrp and myHRP and (hrp.Position - myHRP.Position).Magnitude < 8 then needTP = false end
-		if needTP then teleportToSteven(); task.wait(0.15) end
-		local ok = sellInventoryViaNPC()
-		if CFG.TeleportBack and needTP then returnHome() end
-		setStatus(ok and "Sold entire inventory" or "Failed - no Sell dialog button found", ok)
-		refresh()
+		Mail.ui=nil; Mail.recipientLocked=false
+		local ui,err=openMailbox(); if not ui then setMailMsg(err,false) return end
+		setMailMsg("Searching for "..u.."...",true)
+		local ok,msg=pickRecipient(u)
+		setMailMsg(msg,ok)
+		if ok then refresh() end
+	end)
+end)
+
+MailSendAll.MouseButton1Click:Connect(function()
+	if not Mail.recipientLocked then setMailMsg("Connect to a recipient first",false) return end
+	local data=readInventory(); local plan={}
+	for _,sub in ipairs({"Seeds","Pets","Crates","Gears"}) do
+		local bk="Mail"..sub
+		for _,e in ipairs(data[sub] or {}) do
+			local n=SelectedQty[bk][e.name]
+			if n and n>0 then table.insert(plan,{entry=e,count=n}) end
+		end
+	end
+	if #plan==0 then setMailMsg("Pick at least one item with qty > 0",false) return end
+	setMailMsg(("Mailing %d item types..."):format(#plan),true)
+	task.spawn(function()
+		local ok,msg=sendMailPlan(plan); setMailMsg(tostring(msg),ok)
+		for _,sub in ipairs({"Seeds","Pets","Crates","Gears"}) do SelectedQty["Mail"..sub]={} end
+		task.wait(0.6); refresh()
+	end)
+end)
+
+SellAll.MouseButton1Click:Connect(function()
+	setStatus("Selling entire inventory via Steven...",true)
+	task.spawn(function()
+		local need=true; local _,hrp=getSellPrompt()
+		local myHRP=LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if hrp and myHRP and (hrp.Position-myHRP.Position).Magnitude<8 then need=false end
+		if need then teleportToSteven(); task.wait(0.15) end
+		local ok=sellInvViaNPC()
+		if CFG.TeleportBack and need then returnHome() end
+		setStatus(ok and "Sold entire inventory" or "Failed - no Sell button found",ok); refresh()
 	end)
 end)
 
 SellSel.MouseButton1Click:Connect(function()
-	setStatus("Selling selected quantities...", true)
+	setStatus("Selling selected quantities...",true)
 	task.spawn(function()
-		local needTP = true
-		local _, hrp = getSellPrompt()
-		local myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-		if hrp and myHRP and (hrp.Position - myHRP.Position).Magnitude < 8 then needTP = false end
-		if needTP then teleportToSteven(); task.wait(0.15) end
-		local sold, fail = 0, 0
-		for _, g in ipairs(scanGrouped(CurrentTab)) do
-			local n = SelectedQty[CurrentTab][g.name]
-			if n and n > 0 then
-				for i = 1, math.min(n, g.count) do
-					local tool = g.tools[i]
-					if tool and tool.Parent then
-						if sellOneTool(tool) then sold = sold + 1 else fail = fail + 1 end
-						task.wait(0.1)
-					end
+		local need=true; local _,hrp=getSellPrompt()
+		local myHRP=LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if hrp and myHRP and (hrp.Position-myHRP.Position).Magnitude<8 then need=false end
+		if need then teleportToSteven(); task.wait(0.15) end
+		local sold,fail=0,0
+		for _,g in ipairs(scanGrouped(CurrentTab)) do
+			local n=SelectedQty[CurrentTab][g.name]
+			if n and n>0 then
+				for i=1,math.min(n,g.count) do
+					local t=g.tools[i]
+					if t and t.Parent then if sellOneTool(t) then sold=sold+1 else fail=fail+1 end; task.wait(0.1) end
 				end
-				SelectedQty[CurrentTab][g.name] = nil
+				SelectedQty[CurrentTab][g.name]=nil
 			end
 		end
-		if CFG.TeleportBack and needTP then returnHome() end
-		setStatus(("Sold %d (%d failed)"):format(sold, fail), fail == 0)
-		refresh()
+		if CFG.TeleportBack and need then returnHome() end
+		setStatus(("Sold %d (%d failed)"):format(sold,fail),fail==0); refresh()
 	end)
 end)
 
 Close.MouseButton1Click:Connect(function() Gui:Destroy() end)
 
--- Floating draggable open/close pill
-local Toggle = mk("TextButton", {
-	AnchorPoint = Vector2.new(0, 0.5),
-	Position = UDim2.new(0, 16, 0.5, 0),
-	Size = UDim2.new(0, 54, 0, 54),
-	BackgroundColor3 = Color3.fromRGB(40,90,60),
-	Text = "GAG",
-	Font = Enum.Font.GothamBold, TextSize = 14,
-	TextColor3 = Color3.fromRGB(220,255,225),
-	AutoButtonColor = false,
-	Parent = Gui, Active = true,
-})
-mk("UICorner", { CornerRadius = UDim.new(1, 0), Parent = Toggle })
-mk("UIStroke", { Color = Color3.fromRGB(120,220,150), Thickness = 2, Transparency = 0.2, Parent = Toggle })
-
-local isHidden = false
-local function setHidden(h)
-	isHidden = h
-	Main.Visible = not h
-	Toggle.Text = h and "GAG" or "—"
-	Toggle.BackgroundColor3 = h and Color3.fromRGB(40,90,60) or Color3.fromRGB(80,140,90)
-end
-
+local Toggle=mk("TextButton",{AnchorPoint=Vector2.new(0,0.5),Position=UDim2.new(0,16,0.5,0),Size=UDim2.new(0,54,0,54),
+	BackgroundColor3=TH.accentDim,Text="GAG",Font=Enum.Font.GothamBold,TextSize=14,TextColor3=TH.text,
+	AutoButtonColor=false,Parent=Gui,Active=true})
+mk("UICorner",{CornerRadius=UDim.new(1,0),Parent=Toggle}); mk("UIStroke",{Color=TH.accent,Thickness=2,Transparency=0.2,Parent=Toggle})
+local isHidden=false
+local function setHidden(h) isHidden=h; Main.Visible=not h; Toggle.Text=h and "GAG" or "—" end
 Mini.MouseButton1Click:Connect(function() setHidden(true) end)
-
-do
-	local dragging, moved, startPos, btnStart
-	local DRAG_THRESHOLD = 5
+do local dragging,moved,sp,bs
 	Toggle.InputBegan:Connect(function(i)
-		if i.UserInputType == Enum.UserInputType.MouseButton1
-			or i.UserInputType == Enum.UserInputType.Touch then
-			dragging = true; moved = false
-			startPos = i.Position; btnStart = Toggle.Position
-			i.Changed:Connect(function()
-				if i.UserInputState == Enum.UserInputState.End then
-					if dragging and not moved then
-						setHidden(not isHidden)
-					end
-					dragging = false
-				end
-			end)
+		if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+			dragging=true; moved=false; sp=i.Position; bs=Toggle.Position
+			i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then if dragging and not moved then setHidden(not isHidden) end; dragging=false end end)
 		end
 	end)
 	UserInputService.InputChanged:Connect(function(i)
-		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement
-			or i.UserInputType == Enum.UserInputType.Touch) then
-			local d = i.Position - startPos
-			if math.abs(d.X) + math.abs(d.Y) > DRAG_THRESHOLD then moved = true end
-			Toggle.Position = UDim2.new(
-				btnStart.X.Scale, btnStart.X.Offset + d.X,
-				btnStart.Y.Scale, btnStart.Y.Offset + d.Y
-			)
+		if dragging and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then
+			local d=i.Position-sp; if math.abs(d.X)+math.abs(d.Y)>5 then moved=true end
+			Toggle.Position=UDim2.new(bs.X.Scale,bs.X.Offset+d.X,bs.Y.Scale,bs.Y.Offset+d.Y)
 		end
 	end)
 end
-
-do
-	local drag, start, sp
+do local drag,start,sp
 	Bar.InputBegan:Connect(function(i)
-		if i.UserInputType == Enum.UserInputType.MouseButton1
-			or i.UserInputType == Enum.UserInputType.Touch then
-			drag = true; start = i.Position; sp = Main.Position
-			i.Changed:Connect(function()
-				if i.UserInputState == Enum.UserInputState.End then drag = false end
-			end)
+		if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+			drag=true; start=i.Position; sp=Main.Position
+			i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then drag=false end end)
 		end
 	end)
 	UserInputService.InputChanged:Connect(function(i)
-		if drag and (i.UserInputType == Enum.UserInputType.MouseMovement
-			or i.UserInputType == Enum.UserInputType.Touch) then
-			local d = i.Position - start
-			Main.Position = UDim2.new(sp.X.Scale, sp.X.Offset + d.X,
-				sp.Y.Scale, sp.Y.Offset + d.Y)
+		if drag and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then
+			local d=i.Position-start; Main.Position=UDim2.new(sp.X.Scale,sp.X.Offset+d.X,sp.Y.Scale,sp.Y.Offset+d.Y)
 		end
 	end)
 end
 
 setTab("Pets")
-print("[GAG2 Auto-Sell v8 MAIL] Loaded. Steven prompt:", getSellPrompt() and "OK" or "MISSING")
+print("[GAG2 v9] Loaded.  Steven:",getSellPrompt() and "OK" or "MISSING","Mailbox:",findMailboxPrompt() and "OK" or "MISSING")
