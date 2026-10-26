@@ -10,7 +10,7 @@ local Window = UILibrary:CreateWindow({
 })
 
 local GunTab = Window:CreateTab("Gun", "target")
-local Tab3 = Window:CreateTab("UI Settings", "paint")
+local Tab3 = Window:CreateTab("UI Settings",  "paint")
 GunTab:CreateDivider("🔫  Only Gun")
 
 local Players = game:GetService("Players")
@@ -19,107 +19,12 @@ local Camera = workspace.CurrentCamera
 local Workspace = game:GetService("Workspace")
 local mouse = LocalPlayer:GetMouse()
 
-local function randomSpread()
-    local rx = math.random() * 0.02 - 0.01
-    local ry = math.random() * 0.02 - 0.01
-    local rz = math.sqrt(math.max(0, 1 - rx*rx - ry*ry))
-    return Vector3.new(rx, ry, rz)
-end
-
-local function canSeeTarget(targetCharacter)
-    local myCharacter = LocalPlayer.Character
-    if not myCharacter then return false end
-    local myRoot = myCharacter:FindFirstChild("HumanoidRootPart")
-    local targetRoot = targetCharacter:FindFirstChild("HumanoidRootPart")
-    if not myRoot or not targetRoot then return false end
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = { myCharacter, targetCharacter }
-    local result = Workspace:Raycast(
-        myRoot.Position,
-        targetRoot.Position - myRoot.Position,
-        params
-    )
-    return result == nil
-end
-
 -- ══════════════════════════════════════════════
---  SHARED STATE
--- ══════════════════════════════════════════════
-local silentAimEnabled = false
-local autoShootEnabled = false
-local MAX_DISTANCE = 150
-
-local function getClosestPlayerToCursor(checkLOS)
-    if not LocalPlayer:GetAttribute("Map") then return nil end
-    local myCharacter = LocalPlayer.Character
-    local myRoot = myCharacter and myCharacter:FindFirstChild("HumanoidRootPart")
-    if not myRoot then return nil end
-    local myTeam = LocalPlayer:GetAttribute("Team")
-    local myGame = LocalPlayer:GetAttribute("Game")
-    local mousePos = Vector2.new(mouse.X, mouse.Y)
-    local closestPlayer = nil
-    local shortestDistance = math.huge
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            local character = player.Character
-            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-            local root = character and character:FindFirstChild("HumanoidRootPart")
-            if root
-                and player:GetAttribute("Game") == myGame
-                and player:GetAttribute("Team") ~= myTeam
-                and (not humanoid or humanoid.Health > 0) then
-                local worldDistance = (root.Position - myRoot.Position).Magnitude
-                if worldDistance <= MAX_DISTANCE then
-                    if checkLOS and not canSeeTarget(character) then continue end
-                    local screenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
-                    if onScreen then
-                        local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-                        if dist < shortestDistance then
-                            shortestDistance = dist
-                            closestPlayer = player
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return closestPlayer
-end
-
--- ══════════════════════════════════════════════
---  SINGLE HOOK — only installed once, lazily
--- ══════════════════════════════════════════════
-local hookInstalled = false
-local oldIndex
-
-local function installHookIfNeeded()
-    if hookInstalled then return end
-    hookInstalled = true
-    oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
-        if not checkcaller()
-            and self == mouse
-            and key == "Hit"
-            and (silentAimEnabled or autoShootEnabled) then
-            local target = getClosestPlayerToCursor(autoShootEnabled)
-            if target then
-                local root = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
-                if root then
-                    return CFrame.new(root.Position)
-                end
-            end
-        end
-        return oldIndex(self, key)
-    end))
-end
-
--- ══════════════════════════════════════════════
---  BLOCK 1 — AUTO KILL ALL PLAYERS
+--  AUTO KILL ALL  (⚠ high detection risk)
 -- ══════════════════════════════════════════════
 do
     local running = false
-    local killCooldowns = {}
-    local KILL_COOLDOWN = 2.5
+    local MAX_DISTANCE = 150
 
     local function inMatch()
         return LocalPlayer:GetAttribute("Map") ~= nil
@@ -148,14 +53,14 @@ do
     end
 
     LocalPlayer.CharacterAdded:Connect(function()
-        task.wait(2.5)
+        task.wait(1)
         if running and inMatch() then equipGun() end
     end)
 
     local backpack = LocalPlayer:WaitForChild("Backpack")
     backpack.ChildAdded:Connect(function(child)
         if running and inMatch() and child:IsA("Tool") then
-            task.wait(0.2)
+            task.wait(0.1)
             equipGun()
         end
     end)
@@ -165,78 +70,85 @@ do
         Default = false,
         Callback = function(state)
             running = state
-            if running then
-                task.spawn(function()
-                    while running do
-                        task.wait(math.random() * 0.06 + 0.08)
-                        if not inMatch() then continue end
-                        local character = LocalPlayer.Character
-                        local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-                        if not rootPart then continue end
-                        local equippedTool = character:FindFirstChildOfClass("Tool")
-                        if not equippedTool or not equippedTool:FindFirstChild("showBeam") then
-                            equipGun()
-                        end
-                        local myTeam = LocalPlayer:GetAttribute("Team")
-                        local closestPlayer = nil
-                        local shortestDistance = MAX_DISTANCE
-                        for _, player in ipairs(Players:GetPlayers()) do
-                            if player ~= LocalPlayer then
-                                if player:GetAttribute("Team") ~= myTeam then
-                                    local enemyChar = player.Character
-                                    local enemyRoot = enemyChar and enemyChar:FindFirstChild("HumanoidRootPart")
-                                    if enemyRoot then
-                                        local dist = (enemyRoot.Position - rootPart.Position).Magnitude
-                                        if dist <= MAX_DISTANCE and dist < shortestDistance then
-                                            shortestDistance = dist
-                                            closestPlayer = player
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                        local tool = character:FindFirstChildOfClass("Tool")
-                        if closestPlayer and tool then
-                            local killEvent = tool:FindFirstChild("kill")
-                            if killEvent and killEvent:IsA("RemoteEvent") then
-                                local enemyChar = closestPlayer.Character
-                                if enemyChar and canSeeTarget(enemyChar) then
-                                    local now = tick()
-                                    local lastKill = killCooldowns[closestPlayer.UserId] or 0
-                                    if now - lastKill >= KILL_COOLDOWN then
-                                        killCooldowns[closestPlayer.UserId] = now
-                                        killEvent:FireServer(closestPlayer, randomSpread())
+            if not running then return end
+            task.spawn(function()
+                while running do
+                    task.wait(0.1)
+                    if not inMatch() then continue end
+                    local character = LocalPlayer.Character
+                    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+                    if not rootPart then continue end
+                    local equippedTool = character:FindFirstChildOfClass("Tool")
+                    if not equippedTool or not equippedTool:FindFirstChild("showBeam") then
+                        equipGun()
+                    end
+                    local myTeam = LocalPlayer:GetAttribute("Team")
+                    local closestPlayer = nil
+                    local shortestDistance = MAX_DISTANCE
+                    for _, player in ipairs(Players:GetPlayers()) do
+                        if player ~= LocalPlayer then
+                            local playerTeam = player:GetAttribute("Team")
+                            if playerTeam ~= myTeam then
+                                local enemyCharacter = player.Character
+                                local enemyRoot = enemyCharacter
+                                    and enemyCharacter:FindFirstChild("HumanoidRootPart")
+                                if enemyRoot then
+                                    local distance = (enemyRoot.Position - rootPart.Position).Magnitude
+                                    if distance <= MAX_DISTANCE and distance < shortestDistance then
+                                        shortestDistance = distance
+                                        closestPlayer = player
                                     end
                                 end
                             end
                         end
                     end
-                end)
-            end
+                    local tool = character:FindFirstChildOfClass("Tool")
+                    if closestPlayer and tool then
+                        local killEvent = tool:FindFirstChild("kill")
+                        if killEvent and killEvent:IsA("RemoteEvent") then
+                            killEvent:FireServer(
+                                closestPlayer,
+                                Vector3.new(
+                                    0.149008110165596,
+                                    0.019326409325003624,
+                                    0.9886471033096313
+                                )
+                            )
+                        end
+                    end
+                end
+            end)
         end
     })
 end
 
 -- ══════════════════════════════════════════════
---  BLOCK 2 — AUTO SHOOT WHEN VISIBLE
+--  SHARED AIM SYSTEM  (Silent Aim + Auto Shoot)
 -- ══════════════════════════════════════════════
 do
-    local FIRE_DELAY_MIN = 0.10
-    local FIRE_DELAY_MAX = 0.16
+    local MAX_DISTANCE  = 150
+    local FIRE_DELAY    = 0.3
 
-    local function getGunToolEquipped()
+    local silentAimEnabled = false
+    local autoShootEnabled = false
+
+    local function getGunTool()
         local character = LocalPlayer.Character
-        local backpack = LocalPlayer:FindFirstChild("Backpack")
+        local backpack  = LocalPlayer:FindFirstChild("Backpack")
         if character then
             for _, tool in ipairs(character:GetChildren()) do
-                if tool:IsA("Tool") and tool:FindFirstChild("showBeam") and tool:FindFirstChild("kill") then
+                if tool:IsA("Tool")
+                    and tool:FindFirstChild("showBeam")
+                    and tool:FindFirstChild("kill") then
                     return tool
                 end
             end
         end
         if backpack then
             for _, tool in ipairs(backpack:GetChildren()) do
-                if tool:IsA("Tool") and tool:FindFirstChild("showBeam") and tool:FindFirstChild("kill") then
+                if tool:IsA("Tool")
+                    and tool:FindFirstChild("showBeam")
+                    and tool:FindFirstChild("kill") then
                     return tool
                 end
             end
@@ -244,11 +156,11 @@ do
         return nil
     end
 
-    local function equipGun2()
+    local function equipGun()
         local character = LocalPlayer.Character
-        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        local humanoid  = character and character:FindFirstChildOfClass("Humanoid")
         if not humanoid then return nil end
-        local tool = getGunToolEquipped()
+        local tool = getGunTool()
         if tool and tool.Parent ~= character then
             humanoid:EquipTool(tool)
             task.wait(0.05)
@@ -256,31 +168,128 @@ do
         return tool
     end
 
-    LocalPlayer.CharacterAdded:Connect(function()
-        task.wait(2.5)
-        if autoShootEnabled then equipGun2() end
-    end)
+    local function canSeeTarget(targetCharacter)
+        local myCharacter = LocalPlayer.Character
+        if not myCharacter then return false end
+        local myRoot     = myCharacter:FindFirstChild("HumanoidRootPart")
+        local targetRoot = targetCharacter:FindFirstChild("HumanoidRootPart")
+        if not myRoot or not targetRoot then return false end
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = { myCharacter, targetCharacter }
+        local result = Workspace:Raycast(
+            myRoot.Position,
+            targetRoot.Position - myRoot.Position,
+            params
+        )
+        return result == nil
+    end
 
-    local backpack2 = LocalPlayer:WaitForChild("Backpack")
-    backpack2.ChildAdded:Connect(function(child)
-        if autoShootEnabled and child:IsA("Tool") then
-            task.wait(0.2)
-            equipGun2()
-        end
-    end)
+    -- requireVisibility only matters for Auto Shoot; Silent Aim ignores it.
+    local function getClosestPlayerToCursor(requireVisibility)
+        if not (silentAimEnabled or autoShootEnabled) then return nil end
+        if not LocalPlayer:GetAttribute("Map") then return nil end
 
-    task.spawn(function()
-        while true do
-            task.wait(math.random() * (FIRE_DELAY_MAX - FIRE_DELAY_MIN) + FIRE_DELAY_MIN)
-            if not autoShootEnabled then continue end
-            if not LocalPlayer:GetAttribute("Map") then continue end
-            local target = getClosestPlayerToCursor(true)
-            if target then
-                local tool = equipGun2()
-                if tool and tool.Parent == LocalPlayer.Character then
-                    tool:Activate()
+        local myCharacter = LocalPlayer.Character
+        local myRoot      = myCharacter and myCharacter:FindFirstChild("HumanoidRootPart")
+        if not myRoot then return nil end
+
+        local myTeam    = LocalPlayer:GetAttribute("Team")
+        local myGame    = LocalPlayer:GetAttribute("Game")
+        local mousePos  = Vector2.new(mouse.X, mouse.Y)
+        local closest   = nil
+        local shortest  = math.huge
+
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                local character = player.Character
+                local humanoid  = character and character:FindFirstChildOfClass("Humanoid")
+                local root      = character and character:FindFirstChild("HumanoidRootPart")
+                if humanoid and humanoid.Health > 0 and root
+                    and player:GetAttribute("Game") == myGame
+                    and player:GetAttribute("Team") ~= myTeam then
+                    local worldDistance = (root.Position - myRoot.Position).Magnitude
+                    if worldDistance <= MAX_DISTANCE
+                        and (not requireVisibility or canSeeTarget(character)) then
+                        local screenPos, onScreen =
+                            Camera:WorldToViewportPoint(root.Position)
+                        if onScreen then
+                            local d = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                            if d < shortest then
+                                shortest = d
+                                closest  = player
+                            end
+                        end
+                    end
                 end
             end
+        end
+        return closest
+    end
+
+    -- ── Lazy hook: installed only when a feature is ON ─────────────
+    local rawMt         = getrawmetatable(game)
+    local originalIndex = rawMt.__index
+    local hookActive    = false
+
+    local hookFn = newcclosure(function(self, key)
+        if not checkcaller() and self == mouse and key == "Hit"
+            and (silentAimEnabled or autoShootEnabled) then
+            local requireVis = autoShootEnabled and not silentAimEnabled
+            local target = getClosestPlayerToCursor(requireVis)
+            if target then
+                local root = target.Character
+                    and target.Character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    return CFrame.new(root.Position)
+                end
+            end
+        end
+        return originalIndex(self, key)
+    end)
+
+    local function updateHook()
+        local shouldHook = silentAimEnabled or autoShootEnabled
+        if shouldHook == hookActive then return end
+        pcall(function()
+            setreadonly(rawMt, false)
+            rawMt.__index = shouldHook and hookFn or originalIndex
+            setreadonly(rawMt, true)
+        end)
+        hookActive = shouldHook
+    end
+
+    -- ── Gated auto-shoot loop ──────────────────────────────────────
+    local autoShootLoopRunning = false
+    local function startAutoShootLoop()
+        if autoShootLoopRunning then return end
+        autoShootLoopRunning = true
+        task.spawn(function()
+            while autoShootEnabled do
+                task.wait(FIRE_DELAY + math.random(5, 25) / 100)
+                if not LocalPlayer:GetAttribute("Map") then continue end
+                local target = getClosestPlayerToCursor(true)
+                if target then
+                    local tool = equipGun()
+                    if tool and tool.Parent == LocalPlayer.Character then
+                        tool:Activate()
+                    end
+                end
+            end
+            autoShootLoopRunning = false
+        end)
+    end
+
+    LocalPlayer.CharacterAdded:Connect(function()
+        task.wait(1)
+        if autoShootEnabled or silentAimEnabled then equipGun() end
+    end)
+
+    local backpack = LocalPlayer:WaitForChild("Backpack")
+    backpack.ChildAdded:Connect(function(child)
+        if (autoShootEnabled or silentAimEnabled) and child:IsA("Tool") then
+            task.wait(0.1)
+            equipGun()
         end
     end)
 
@@ -289,27 +298,23 @@ do
         Default = false,
         Callback = function(state)
             autoShootEnabled = state
+            updateHook()
             if state then
-                installHookIfNeeded()
-                equipGun2()
+                equipGun()
+                startAutoShootLoop()
             end
         end
     })
-end
 
--- ══════════════════════════════════════════════
---  BLOCK 3 — SILENT AIM
--- ══════════════════════════════════════════════
-GunTab:CreateToggle({
-    Text = "Silent Aim",
-    Default = false,
-    Callback = function(state)
-        silentAimEnabled = state
-        if state then
-            installHookIfNeeded()
+    GunTab:CreateToggle({
+        Text = "Silent Aim",
+        Default = false,
+        Callback = function(state)
+            silentAimEnabled = state
+            updateHook()
         end
-    end
-})
+    })
+end
 
 -- ══════════════════════════════════════════════
 --  UI SETTINGS TAB
