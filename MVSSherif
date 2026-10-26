@@ -1,334 +1,182 @@
-local UILibrary = loadstring(game:HttpGet("https://pastebin.com/raw/aB72ENPP"))()
-
-local Window = UILibrary:CreateWindow({
-    Title      = "[DUELS] Murderers VS Sheriffs",
-    Subtitle   = "by Phemonaz",
-    Size       = UDim2.new(0, 500, 0, 400),
-    ToggleKey  = Enum.KeyCode.P,
-    Theme      = "Teal",
-    Image      = "rbxassetid://92882092628695",
-})
-
-local GunTab = Window:CreateTab("Gun", "target")
-local Tab3 = Window:CreateTab("UI Settings",  "paint")
-GunTab:CreateDivider("🔫  Only Gun")
+-- MOBILE LOCK-ON AIMBOT
+-- No metatable hooks, no remote event spam.
+-- Moves the actual camera to point at the target.
 
 local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
 local Workspace = game:GetService("Workspace")
-local mouse = LocalPlayer:GetMouse()
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
 
 -- ══════════════════════════════════════════════
---  AUTO KILL ALL  (⚠ high detection risk)
+--  CONFIGURATION
 -- ══════════════════════════════════════════════
-do
-    local running = false
-    local MAX_DISTANCE = 150
+local MAX_DISTANCE = 200      -- Max studs to lock onto
+local FOV = 120               -- Screen-space FOV (pixels from center)
+local SMOOTHNESS = 0.25       -- 0 = instant snap, 1 = never move
+local AIM_PART = "Head"       -- "Head" or "HumanoidRootPart"
 
-    local function inMatch()
-        return LocalPlayer:GetAttribute("Map") ~= nil
-    end
+local locked = false
+local currentTarget = nil
 
-    local function getGunTool()
-        local backpack = LocalPlayer:FindFirstChild("Backpack")
-        if not backpack then return nil end
-        for _, tool in ipairs(backpack:GetChildren()) do
-            if tool:IsA("Tool") and tool:FindFirstChild("showBeam") then
-                if tool.showBeam:IsA("RemoteEvent") then
-                    return tool
+-- ══════════════════════════════════════════════
+--  HELPER FUNCTIONS
+-- ══════════════════════════════════════════════
+local function getLocalRoot()
+    local char = LocalPlayer.Character
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function isEnemy(player)
+    if player == LocalPlayer then return false end
+    local myTeam = LocalPlayer:GetAttribute("Team")
+    local theirTeam = player:GetAttribute("Team")
+    return theirTeam ~= myTeam
+end
+
+local function hasLineOfSight(targetChar)
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    local targetRoot = targetChar and targetChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot or not targetRoot then return false end
+
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = { myChar, targetChar }
+
+    local result = Workspace:Raycast(myRoot.Position, targetRoot.Position - myRoot.Position, params)
+    return result == nil
+end
+
+local function getClosestTarget()
+    local myRoot = getLocalRoot()
+    if not myRoot then return nil end
+
+    local viewportCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local bestTarget, bestDist = nil, math.huge
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if isEnemy(player) then
+            local char = player.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if hum and hum.Health > 0 and root then
+                local worldDist = (root.Position - myRoot.Position).Magnitude
+                if worldDist <= MAX_DISTANCE and hasLineOfSight(char) then
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+                    if onScreen then
+                        local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
+                        if screenDist <= FOV and screenDist < bestDist then
+                            bestDist = screenDist
+                            bestTarget = player
+                        end
+                    end
                 end
             end
         end
-        return nil
     end
+    return bestTarget
+end
 
-    local function equipGun()
-        if not inMatch() then return end
-        local character = LocalPlayer.Character
-        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        if not humanoid then return end
-        local tool = getGunTool()
-        if tool then humanoid:EquipTool(tool) end
-    end
-
-    LocalPlayer.CharacterAdded:Connect(function()
-        task.wait(1)
-        if running and inMatch() then equipGun() end
-    end)
-
-    local backpack = LocalPlayer:WaitForChild("Backpack")
-    backpack.ChildAdded:Connect(function(child)
-        if running and inMatch() and child:IsA("Tool") then
-            task.wait(0.1)
-            equipGun()
-        end
-    end)
-
-    GunTab:CreateToggle({
-        Text = "Auto Kill All Players",
-        Default = false,
-        Callback = function(state)
-            running = state
-            if not running then return end
-            task.spawn(function()
-                while running do
-                    task.wait(0.1)
-                    if not inMatch() then continue end
-                    local character = LocalPlayer.Character
-                    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-                    if not rootPart then continue end
-                    local equippedTool = character:FindFirstChildOfClass("Tool")
-                    if not equippedTool or not equippedTool:FindFirstChild("showBeam") then
-                        equipGun()
-                    end
-                    local myTeam = LocalPlayer:GetAttribute("Team")
-                    local closestPlayer = nil
-                    local shortestDistance = MAX_DISTANCE
-                    for _, player in ipairs(Players:GetPlayers()) do
-                        if player ~= LocalPlayer then
-                            local playerTeam = player:GetAttribute("Team")
-                            if playerTeam ~= myTeam then
-                                local enemyCharacter = player.Character
-                                local enemyRoot = enemyCharacter
-                                    and enemyCharacter:FindFirstChild("HumanoidRootPart")
-                                if enemyRoot then
-                                    local distance = (enemyRoot.Position - rootPart.Position).Magnitude
-                                    if distance <= MAX_DISTANCE and distance < shortestDistance then
-                                        shortestDistance = distance
-                                        closestPlayer = player
-                                    end
-                                end
-                            end
-                        end
-                    end
-                    local tool = character:FindFirstChildOfClass("Tool")
-                    if closestPlayer and tool then
-                        local killEvent = tool:FindFirstChild("kill")
-                        if killEvent and killEvent:IsA("RemoteEvent") then
-                            killEvent:FireServer(
-                                closestPlayer,
-                                Vector3.new(
-                                    0.149008110165596,
-                                    0.019326409325003624,
-                                    0.9886471033096313
-                                )
-                            )
-                        end
-                    end
-                end
-            end)
-        end
-    })
+local function getAimPosition(player)
+    local char = player.Character
+    if not char then return nil end
+    local part = char:FindFirstChild(AIM_PART) or char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+    return part and part.Position or nil
 end
 
 -- ══════════════════════════════════════════════
---  SHARED AIM SYSTEM  (Silent Aim + Auto Shoot)
+--  CAMERA LOCK LOGIC
 -- ══════════════════════════════════════════════
-do
-    local MAX_DISTANCE  = 150
-    local FIRE_DELAY    = 0.3
-
-    local silentAimEnabled = false
-    local autoShootEnabled = false
-
-    local function getGunTool()
-        local character = LocalPlayer.Character
-        local backpack  = LocalPlayer:FindFirstChild("Backpack")
-        if character then
-            for _, tool in ipairs(character:GetChildren()) do
-                if tool:IsA("Tool")
-                    and tool:FindFirstChild("showBeam")
-                    and tool:FindFirstChild("kill") then
-                    return tool
-                end
-            end
-        end
-        if backpack then
-            for _, tool in ipairs(backpack:GetChildren()) do
-                if tool:IsA("Tool")
-                    and tool:FindFirstChild("showBeam")
-                    and tool:FindFirstChild("kill") then
-                    return tool
-                end
-            end
-        end
-        return nil
+local function updateLock()
+    if not locked then
+        currentTarget = nil
+        return
     end
 
-    local function equipGun()
-        local character = LocalPlayer.Character
-        local humanoid  = character and character:FindFirstChildOfClass("Humanoid")
-        if not humanoid then return nil end
-        local tool = getGunTool()
-        if tool and tool.Parent ~= character then
-            humanoid:EquipTool(tool)
-            task.wait(0.05)
-        end
-        return tool
+    if not currentTarget or not currentTarget.Character or not currentTarget.Character:FindFirstChild("Humanoid") or currentTarget.Character.Humanoid.Health <= 0 then
+        currentTarget = getClosestTarget()
     end
 
-    local function canSeeTarget(targetCharacter)
-        local myCharacter = LocalPlayer.Character
-        if not myCharacter then return false end
-        local myRoot     = myCharacter:FindFirstChild("HumanoidRootPart")
-        local targetRoot = targetCharacter:FindFirstChild("HumanoidRootPart")
-        if not myRoot or not targetRoot then return false end
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = { myCharacter, targetCharacter }
-        local result = Workspace:Raycast(
-            myRoot.Position,
-            targetRoot.Position - myRoot.Position,
-            params
-        )
-        return result == nil
+    if not currentTarget then
+        locked = false
+        return
     end
 
-    -- requireVisibility only matters for Auto Shoot; Silent Aim ignores it.
-    local function getClosestPlayerToCursor(requireVisibility)
-        if not (silentAimEnabled or autoShootEnabled) then return nil end
-        if not LocalPlayer:GetAttribute("Map") then return nil end
-
-        local myCharacter = LocalPlayer.Character
-        local myRoot      = myCharacter and myCharacter:FindFirstChild("HumanoidRootPart")
-        if not myRoot then return nil end
-
-        local myTeam    = LocalPlayer:GetAttribute("Team")
-        local myGame    = LocalPlayer:GetAttribute("Game")
-        local mousePos  = Vector2.new(mouse.X, mouse.Y)
-        local closest   = nil
-        local shortest  = math.huge
-
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer then
-                local character = player.Character
-                local humanoid  = character and character:FindFirstChildOfClass("Humanoid")
-                local root      = character and character:FindFirstChild("HumanoidRootPart")
-                if humanoid and humanoid.Health > 0 and root
-                    and player:GetAttribute("Game") == myGame
-                    and player:GetAttribute("Team") ~= myTeam then
-                    local worldDistance = (root.Position - myRoot.Position).Magnitude
-                    if worldDistance <= MAX_DISTANCE
-                        and (not requireVisibility or canSeeTarget(character)) then
-                        local screenPos, onScreen =
-                            Camera:WorldToViewportPoint(root.Position)
-                        if onScreen then
-                            local d = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-                            if d < shortest then
-                                shortest = d
-                                closest  = player
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        return closest
+    local aimPos = getAimPosition(currentTarget)
+    if not aimPos then
+        locked = false
+        return
     end
 
-    -- ── Lazy hook: installed only when a feature is ON ─────────────
-    local rawMt         = getrawmetatable(game)
-    local originalIndex = rawMt.__index
-    local hookActive    = false
-
-    local hookFn = newcclosure(function(self, key)
-        if not checkcaller() and self == mouse and key == "Hit"
-            and (silentAimEnabled or autoShootEnabled) then
-            local requireVis = autoShootEnabled and not silentAimEnabled
-            local target = getClosestPlayerToCursor(requireVis)
-            if target then
-                local root = target.Character
-                    and target.Character:FindFirstChild("HumanoidRootPart")
-                if root then
-                    return CFrame.new(root.Position)
-                end
-            end
-        end
-        return originalIndex(self, key)
-    end)
-
-    local function updateHook()
-        local shouldHook = silentAimEnabled or autoShootEnabled
-        if shouldHook == hookActive then return end
-        pcall(function()
-            setreadonly(rawMt, false)
-            rawMt.__index = shouldHook and hookFn or originalIndex
-            setreadonly(rawMt, true)
-        end)
-        hookActive = shouldHook
+    local goalCFrame = CFrame.new(Camera.CFrame.Position, aimPos)
+    if SMOOTHNESS <= 0 then
+        Camera.CFrame = goalCFrame
+    else
+        Camera.CFrame = Camera.CFrame:Lerp(goalCFrame, 1 - SMOOTHNESS)
     end
-
-    -- ── Gated auto-shoot loop ──────────────────────────────────────
-    local autoShootLoopRunning = false
-    local function startAutoShootLoop()
-        if autoShootLoopRunning then return end
-        autoShootLoopRunning = true
-        task.spawn(function()
-            while autoShootEnabled do
-                task.wait(FIRE_DELAY + math.random(5, 25) / 100)
-                if not LocalPlayer:GetAttribute("Map") then continue end
-                local target = getClosestPlayerToCursor(true)
-                if target then
-                    local tool = equipGun()
-                    if tool and tool.Parent == LocalPlayer.Character then
-                        tool:Activate()
-                    end
-                end
-            end
-            autoShootLoopRunning = false
-        end)
-    end
-
-    LocalPlayer.CharacterAdded:Connect(function()
-        task.wait(1)
-        if autoShootEnabled or silentAimEnabled then equipGun() end
-    end)
-
-    local backpack = LocalPlayer:WaitForChild("Backpack")
-    backpack.ChildAdded:Connect(function(child)
-        if (autoShootEnabled or silentAimEnabled) and child:IsA("Tool") then
-            task.wait(0.1)
-            equipGun()
-        end
-    end)
-
-    GunTab:CreateToggle({
-        Text = "Auto Shoot When Visible",
-        Default = false,
-        Callback = function(state)
-            autoShootEnabled = state
-            updateHook()
-            if state then
-                equipGun()
-                startAutoShootLoop()
-            end
-        end
-    })
-
-    GunTab:CreateToggle({
-        Text = "Silent Aim",
-        Default = false,
-        Callback = function(state)
-            silentAimEnabled = state
-            updateHook()
-        end
-    })
 end
 
+RunService.RenderStepped:Connect(updateLock)
+
 -- ══════════════════════════════════════════════
---  UI SETTINGS TAB
+--  MOBILE UI: DRAGGABLE "LOCK" BUTTON
 -- ══════════════════════════════════════════════
-Tab3:CreateDivider("Theme")
-Tab3:CreateDropdown({
-    Text     = "UI Theme",
-    Options  = { "Default", "Red", "Green", "Purple", "Cyan", "Blue", "Pink", "Yellow", "Teal", "Magenta", "Orange", "Rose", "Gold" },
-    Default  = "Teal",
-    Callback = function(theme) Window:SetTheme(theme) end,
-})
-Tab3:CreateDivider("UI")
-Tab3:CreateKeybind({
-    Text     = "Toggle UI",
-    Default  = Enum.KeyCode.P,
-    Callback = function(key) Window:SetToggleKey(key) end,
-})
+local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "MobileAimbotUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+local button = Instance.new("TextButton")
+button.Name = "LockButton"
+button.Size = UDim2.new(0, 80, 0, 80)
+button.Position = UDim2.new(1, -100, 0.5, -40) -- right side of screen
+button.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+button.BackgroundTransparency = 0.2
+button.TextColor3 = Color3.fromRGB(255, 255, 255)
+button.Font = Enum.Font.GothamBold
+button.TextSize = 20
+button.Text = "LOCK"
+button.BorderSizePixel = 0
+button.Parent = screenGui
+
+-- Rounded corners
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = button
+
+-- Toggle logic
+button.MouseButton1Click:Connect(function()
+    locked = not locked
+    if locked then
+        currentTarget = getClosestTarget()
+        button.BackgroundColor3 = Color3.fromRGB(0, 200, 100) -- green when active
+        button.Text = "UNLOCK"
+    else
+        button.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        button.Text = "LOCK"
+        currentTarget = nil
+    end
+end)
+
+-- Dragging logic (works on mobile)
+local dragging, dragInput, dragStart, startPos
+button.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = button.Position
+    end
+end)
+button.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        button.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+button.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
