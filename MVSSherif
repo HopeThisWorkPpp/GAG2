@@ -1,333 +1,3656 @@
-local UILibrary = loadstring(game:HttpGet("https://pastebin.com/raw/aB72ENPP"))()
+--[[
+    FastDex - MVS (Murder vs Sheriff) hub, by FrannnDev (DecentHolograms)
+    Source: github.com/decentholograms/Roblox-Scripts  (Scripts/MvsS.lua)
 
-local Window = UILibrary:CreateWindow({
-    Title      = "[DUELS] Murderers VS Sheriffs",
-    Subtitle   = "by Phemonaz",
-    Size       = UDim2.new(0, 500, 0, 400),
-    ToggleKey  = Enum.KeyCode.P,
-    Theme      = "Teal",
-    Image      = "rbxassetid://92882092628695",
-})
+    Deobfuscated / readable version.
+      * all 983 XOR-encrypted strings decrypted
+      * constant arithmetic folded, control-flow flattening removed (332 state machines)
+      * variables renamed from context (original names/comments are not recoverable)
+    Logic is unchanged from the obfuscated original.
 
-local GunTab = Window:CreateTab("Gun", "target")
-local Tab3 = Window:CreateTab("UI Settings", "paint")
-GunTab:CreateDivider("🔫  Only Gun")
-
+    Notes on quirks that exist in the original:
+      * `KnifeKill` is never defined (global nil) - the "Kill Everyone (Add Winned Rounds)" button and
+        Kill Spam do nothing unless something else sets it.
+      * bindRemoveButton calls `setupAddButton`, which is never defined (bindAddButton is declared
+        after it), so that call errors if reached.
+      * Only network access: loads the Rayfield UI library from sirius.menu/rayfield.
+]]
 local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local localPlayer = Players.LocalPlayer
+local buyCaseRemote = ReplicatedStorage.Remotes:WaitForChild("BuyCase")
 local RunService = game:GetService("RunService")
-local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
+local VirtualUser = game:GetService("VirtualUser")
 local Workspace = game:GetService("Workspace")
-local mouse = LocalPlayer:GetMouse()
-
-local MAX_DISTANCE = 150
-
-local function randomSpread()
-    local rx = math.random() * 0.02 - 0.01
-    local ry = math.random() * 0.02 - 0.01
-    local rz = math.sqrt(math.max(0, 1 - rx*rx - ry*ry))
-    return Vector3.new(rx, ry, rz)
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ItemModule = require(ReplicatedStorage.Modules:WaitForChild("Item"))
+local tradeItemRemote = ReplicatedStorage.Remotes:WaitForChild("TradeItem")
+local tradeRemote = ReplicatedStorage.Remotes:WaitForChild("Trade")
+local mainTradingFrame = localPlayer.PlayerGui.Main.MainTradingFrame
+local skinsFolder = localPlayer:WaitForChild("SkinsFolder")
+local equipItemRemote = ReplicatedStorage.Remotes:WaitForChild("EquipItem")
+local backpack = localPlayer:WaitForChild("Backpack")
+local mouse = localPlayer:GetMouse()
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local localPlayer2 = Players.LocalPlayer
+local playerGui = localPlayer2:WaitForChild("PlayerGui")
+local HttpService = game:GetService("HttpService")
+local localPlayer3 = game:GetService("Players").LocalPlayer
+local RunService = game:GetService("RunService")
+local invisibilityConnection = nil
+local tradeItemRemote2 = ReplicatedStorage.Remotes:WaitForChild("TradeItem")
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
+task.wait(1)
+local localPlayer4 = Players.LocalPlayer
+if not localPlayer4 then
+    repeat
+        task.wait()
+    until Players.LocalPlayer
+    localPlayer4 = Players.LocalPlayer
 end
-
-local function canSeeTarget(targetCharacter)
-    local myCharacter = LocalPlayer.Character
-    if not myCharacter then return false end
-    local myRoot = myCharacter:FindFirstChild("HumanoidRootPart")
-    local targetRoot = targetCharacter:FindFirstChild("HumanoidRootPart")
-    if not myRoot or not targetRoot then return false end
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = { myCharacter, targetCharacter }
-    local result = Workspace:Raycast(
-        myRoot.Position,
-        targetRoot.Position - myRoot.Position,
-        params
-    )
-    return result == nil
+-- UI library
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+local Window = Rayfield:CreateWindow({
+    Name = "FastDex - MVS - By FrannnDev",
+    LoadingTitle = "FastDex - MVS",
+    LoadingSubtitle = "By ! FrannnDev (DecentHolograms)",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "FastDexConfig",
+        FileName = "MVSFastDex",
+    },
+    KeySystem = false,
+})
+-- ============================================================
+-- Team / player helpers
+-- ============================================================
+local function getTeamFrames()
+    local ok, redFrame, blueFrame = pcall(function()
+        local playerGui2 = localPlayer:FindFirstChildOfClass("PlayerGui")
+        if not playerGui2 then
+            return nil, nil
+        end
+        local main = playerGui2:FindFirstChild("Main")
+        if not main then
+            return nil, nil
+        end
+        local mainGameFrame = main:FindFirstChild("MainGameFrame")
+        if not mainGameFrame then
+            return nil, nil
+        end
+        local playersFrame = mainGameFrame:FindFirstChild("PlayersFrame")
+        if not playersFrame then
+            return nil, nil
+        end
+        return playersFrame:FindFirstChild("TeamRedFrame"), playersFrame:FindFirstChild("TeamBlueFrame")
+    end)
+    if not ok or not redFrame or not blueFrame then
+        return nil, nil
+    end
+    return redFrame, blueFrame
 end
-
-local function getClosestPlayerToCursor(checkLOS)
-    if not LocalPlayer:GetAttribute("Map") then return nil end
-    local myCharacter = LocalPlayer.Character
-    local myRoot = myCharacter and myCharacter:FindFirstChild("HumanoidRootPart")
-    if not myRoot then return nil end
-    local myTeam = LocalPlayer:GetAttribute("Team")
-    local myGame = LocalPlayer:GetAttribute("Game")
-    local mousePos = Vector2.new(mouse.X, mouse.Y)
-    local closestPlayer = nil
-    local shortestDistance = math.huge
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            local character = player.Character
-            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-            local root = character and character:FindFirstChild("HumanoidRootPart")
-            if root
-                and player:GetAttribute("Game") == myGame
-                and player:GetAttribute("Team") ~= myTeam
-                and (not humanoid or humanoid.Health > 0) then
-                local worldDistance = (root.Position - myRoot.Position).Magnitude
-                if worldDistance <= MAX_DISTANCE then
-                    if checkLOS and not canSeeTarget(character) then continue end
-                    local screenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
-                    if onScreen then
-                        local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-                        if dist < shortestDistance then
-                            shortestDistance = dist
-                            closestPlayer = player
+local function getFrameNames(frame)
+    local tbl = {}
+    for _, child in ipairs(frame:GetChildren()) do
+        if child:IsA("Frame") then
+            table.insert(tbl, child.Name)
+        end
+    end
+    return tbl
+end
+local function stripSpaces(value)
+    return tostring(value):gsub("%s+", "")
+end
+local function getEnemyPlayers()
+    local redFrame, blueFrame = getTeamFrames()
+    if not redFrame or not blueFrame then
+        return {}
+    end
+    local redNames = getFrameNames(redFrame)
+    local blueNames = getFrameNames(blueFrame)
+    local flag, flag2 = false, false
+    local tbl, tbl2 = {}, {}
+    for _, redName in ipairs(redNames) do
+        local name = stripSpaces(redName)
+        tbl[name] = true
+        if name == stripSpaces(localPlayer.Name) then
+            flag = true
+        end
+    end
+    for _, blueName in ipairs(blueNames) do
+        local name = stripSpaces(blueName)
+        tbl2[name] = true
+        if name == stripSpaces(localPlayer.Name) then
+            flag2 = true
+        end
+    end
+    if not (flag or flag2) then
+        return {}
+    end
+    local value = (flag and tbl2) or tbl
+    local tbl3 = {}
+    for key, _ in pairs(value) do
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if (stripSpaces(plr.Name) == key) and (plr ~= localPlayer) then
+                table.insert(tbl3, plr)
+            end
+        end
+    end
+    return tbl3
+end
+local function openItemViewer(targetName)
+    local Players = game:GetService("Players")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local UserInputService = game:GetService("UserInputService")
+    local RunService = game:GetService("RunService")
+    local TweenService = game:GetService("TweenService")
+    local localPlayer5 = Players.LocalPlayer
+    local playerGui2 = localPlayer5:WaitForChild("PlayerGui")
+    if playerGui2:FindFirstChild("FastDexItemViewer") then
+        playerGui2:FindFirstChild("FastDexItemViewer"):Destroy()
+    end
+    local playerName = targetName
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "FastDexItemViewer"
+    gui.ResetOnSpawn = false
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.IgnoreGuiInset = true
+    gui.Parent = playerGui2
+    local blur = Instance.new("BlurEffect")
+    blur.Size = 0
+    blur.Parent = game.Lighting
+    local function isMobile()
+        return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+    end
+    local frame = Instance.new("Frame")
+    frame.Name = "MainFrame"
+    frame.AnchorPoint = Vector2.new(0.5, 0.5)
+    frame.Position = UDim2.new(0.5, 0, 0.5, 0)
+    frame.Size = (isMobile() and UDim2.new(0.88, 0, 0, 320)) or UDim2.new(0, 550, 0, 320)
+    frame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+    frame.BorderSizePixel = 0
+    frame.ClipsDescendants = true
+    frame.Parent = gui
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 15)
+    corner.Parent = frame
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(100, 100, 120)
+    stroke.Thickness = 1
+    stroke.Transparency = 0.7
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.Parent = frame
+    local frame2 = Instance.new("Frame")
+    frame2.Name = "Header"
+    frame2.Size = UDim2.new(1, 0, 0, 28)
+    frame2.BackgroundColor3 = Color3.fromRGB(255, 107, 53)
+    frame2.BorderSizePixel = 0
+    frame2.Parent = frame
+    local gradient = Instance.new("UIGradient")
+    gradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 107, 53)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 69, 0)),
+    })
+    gradient.Rotation = 90
+    gradient.Parent = frame2
+    local corner2 = Instance.new("UICorner")
+    corner2.CornerRadius = UDim.new(0, 15)
+    corner2.Parent = frame2
+    local frame3 = Instance.new("Frame")
+    frame3.Size = UDim2.new(1, 0, 0, 15)
+    frame3.Position = UDim2.new(0, 0, 1, -15)
+    frame3.BackgroundColor3 = Color3.fromRGB(255, 69, 0)
+    frame3.BorderSizePixel = 0
+    frame3.Parent = frame2
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -50, 1, 0)
+    label.Position = UDim2.new(0, 15, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = "FastDex Inventory Viewer"
+    label.TextColor3 = Color3.new(1, 1, 1)
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = (isMobile() and 12) or 14
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = frame2
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(0, 22, 0, 22)
+    button.Position = UDim2.new(1, -30, 0.5, -11)
+    button.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+    button.Text = "X"
+    button.TextColor3 = Color3.new(1, 1, 1)
+    button.Font = Enum.Font.GothamBold
+    button.TextSize = 14
+    button.BorderSizePixel = 0
+    button.Parent = frame2
+    local corner3 = Instance.new("UICorner")
+    corner3.CornerRadius = UDim.new(0, 6)
+    corner3.Parent = button
+    local flag = false
+    local dragStart = nil
+    local startPos = nil
+    frame2.InputBegan:Connect(function(input)
+        if (input.UserInputType == Enum.UserInputType.MouseButton1) or (input.UserInputType == Enum.UserInputType.Touch) then
+            flag = true
+            dragStart = input.Position
+            startPos = frame.Position
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if flag and ((input.UserInputType == Enum.UserInputType.MouseMovement) or (input.UserInputType == Enum.UserInputType.Touch)) then
+            local value = input.Position - dragStart
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + value.X, startPos.Y.Scale, startPos.Y.Offset + value.Y)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if (input.UserInputType == Enum.UserInputType.MouseButton1) or (input.UserInputType == Enum.UserInputType.Touch) then
+            flag = false
+        end
+    end)
+    local frame4 = Instance.new("Frame")
+    frame4.Size = UDim2.new(1, 0, 1, -45)
+    frame4.Position = UDim2.new(0, 0, 0, 45)
+    frame4.BackgroundTransparency = 1
+    frame4.BorderSizePixel = 0
+    frame4.Parent = frame
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(1, -20, 1, -20)
+    scroll.Position = UDim2.new(0, 10, 0, 10)
+    scroll.BackgroundTransparency = 1
+    scroll.BorderSizePixel = 0
+    scroll.ScrollBarThickness = 4
+    scroll.ScrollBarImageColor3 = Color3.fromRGB(255, 107, 53)
+    scroll.ScrollBarImageTransparency = 0.7
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    scroll.Parent = frame4
+    local grid = Instance.new("UIGridLayout")
+    grid.CellSize = (isMobile() and UDim2.new(0.48, 0, 0, 170)) or UDim2.new(0, 240, 0, 170)
+    grid.CellPadding = UDim2.new(0, 10, 0, 10)
+    grid.SortOrder = Enum.SortOrder.LayoutOrder
+    grid.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    grid.Parent = scroll
+    local padding = Instance.new("UIPadding")
+    padding.PaddingTop = UDim.new(0, 5)
+    padding.PaddingBottom = UDim.new(0, 5)
+    padding.Parent = scroll
+    local label2 = Instance.new("TextLabel")
+    label2.Size = UDim2.new(1, 0, 1, 0)
+    label2.BackgroundTransparency = 1
+    label2.Text = ""
+    label2.TextColor3 = Color3.fromRGB(255, 100, 100)
+    label2.Font = Enum.Font.GothamBold
+    label2.TextSize = 18
+    label2.Visible = false
+    label2.Parent = frame4
+    local blur2 = Instance.new("BlurEffect")
+    blur2.Size = 0
+    blur2.Parent = game.Lighting
+    local frame5 = Instance.new("Frame")
+    frame5.Name = "FullscreenViewer"
+    frame5.Size = UDim2.new(1, 0, 1, 0)
+    frame5.Position = UDim2.new(0, 0, 0, 0)
+    frame5.BackgroundTransparency = 1
+    frame5.BorderSizePixel = 0
+    frame5.Visible = false
+    frame5.ZIndex = 100
+    frame5.Active = true
+    frame5.Parent = gui
+    local frame6 = Instance.new("Frame")
+    frame6.Name = "ViewFrame"
+    frame6.AnchorPoint = Vector2.new(0.5, 0.5)
+    frame6.Position = UDim2.new(0.5, 0, 0.5, 0)
+    frame6.Size = (isMobile() and UDim2.new(0.88, 0, 0, 300)) or UDim2.new(0, 380, 0, 310)
+    frame6.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+    frame6.BorderSizePixel = 0
+    frame6.ZIndex = 101
+    frame6.Active = true
+    frame6.Parent = frame5
+    local corner4 = Instance.new("UICorner")
+    corner4.CornerRadius = UDim.new(0, 20)
+    corner4.Parent = frame6
+    local stroke2 = Instance.new("UIStroke")
+    stroke2.Color = Color3.fromRGB(255, 107, 53)
+    stroke2.Thickness = 2
+    stroke2.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke2.Parent = frame6
+    local flag2 = false
+    local dragStart2 = nil
+    local startPos2 = nil
+    local frame7 = Instance.new("Frame")
+    frame7.Size = UDim2.new(1, 0, 0, 32)
+    frame7.BackgroundColor3 = Color3.fromRGB(255, 107, 53)
+    frame7.BorderSizePixel = 0
+    frame7.ZIndex = 101
+    frame7.Parent = frame6
+    frame7.InputBegan:Connect(function(input)
+        if (input.UserInputType == Enum.UserInputType.MouseButton1) or (input.UserInputType == Enum.UserInputType.Touch) then
+            flag2 = true
+            dragStart2 = input.Position
+            startPos2 = frame6.Position
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if flag2 and ((input.UserInputType == Enum.UserInputType.MouseMovement) or (input.UserInputType == Enum.UserInputType.Touch)) then
+            local value = input.Position - dragStart2
+            frame6.Position = UDim2.new(startPos2.X.Scale, startPos2.X.Offset + value.X, startPos2.Y.Scale, startPos2.Y.Offset + value.Y)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if (input.UserInputType == Enum.UserInputType.MouseButton1) or (input.UserInputType == Enum.UserInputType.Touch) then
+            flag2 = false
+        end
+    end)
+    local corner5 = Instance.new("UICorner")
+    corner5.CornerRadius = UDim.new(0, 20)
+    corner5.Parent = frame7
+    local frame8 = Instance.new("Frame")
+    frame8.Size = UDim2.new(1, 0, 0, 20)
+    frame8.Position = UDim2.new(0, 0, 1, -20)
+    frame8.BackgroundColor3 = Color3.fromRGB(255, 107, 53)
+    frame8.BorderSizePixel = 0
+    frame8.ZIndex = 101
+    frame8.Parent = frame7
+    local label3 = Instance.new("TextLabel")
+    label3.Size = UDim2.new(1, -50, 1, 0)
+    label3.Position = UDim2.new(0, 10, 0, 0)
+    label3.BackgroundTransparency = 1
+    label3.Text = "Item Preview"
+    label3.TextColor3 = Color3.new(1, 1, 1)
+    label3.Font = Enum.Font.GothamBold
+    label3.TextSize = (isMobile() and 12) or 14
+    label3.TextXAlignment = Enum.TextXAlignment.Left
+    label3.ZIndex = 101
+    label3.Parent = frame7
+    local button2 = Instance.new("TextButton")
+    button2.Size = UDim2.new(0, 24, 0, 24)
+    button2.Position = UDim2.new(1, -30, 0.5, -12)
+    button2.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+    button2.Text = "X"
+    button2.TextColor3 = Color3.new(1, 1, 1)
+    button2.Font = Enum.Font.GothamBold
+    button2.TextSize = 14
+    button2.BorderSizePixel = 0
+    button2.ZIndex = 102
+    button2.Parent = frame7
+    local corner6 = Instance.new("UICorner")
+    corner6.CornerRadius = UDim.new(0, 8)
+    corner6.Parent = button2
+    local viewport = Instance.new("ViewportFrame")
+    viewport.Size = UDim2.new(1, -14, 1, -46)
+    viewport.Position = UDim2.new(0, 7, 0, 38)
+    viewport.BackgroundColor3 = Color3.fromRGB(20, 20, 35)
+    viewport.BorderSizePixel = 0
+    viewport.ZIndex = 101
+    viewport.Parent = frame6
+    local corner7 = Instance.new("UICorner")
+    corner7.CornerRadius = UDim.new(0, 15)
+    corner7.Parent = viewport
+    local camera = Instance.new("Camera")
+    camera.Parent = viewport
+    viewport.CurrentCamera = camera
+    local function showFullscreenPreview(item, itemName, count)
+        label3.Text = itemName .. " x" .. count
+        for _, child in pairs(viewport:GetChildren()) do
+            if child:IsA("Model") then
+                child:Destroy()
+            end
+        end
+        local previewClone
+        if item:IsA("Model") then
+            previewClone = item:Clone()
+            previewClone.Parent = viewport
+        elseif item:IsA("BasePart") then
+            previewClone = Instance.new("Model")
+            local primaryPart = item:Clone()
+            primaryPart.Parent = previewClone
+            previewClone.PrimaryPart = primaryPart
+            previewClone.Parent = viewport
+        end
+        if not previewClone then
+            return
+        end
+        local boundsCFrame, boundsSize = previewClone:GetBoundingBox()
+        local value = math.max(boundsSize.X, boundsSize.Y, boundsSize.Z)
+        local value2 = value * 2.5
+        local value3, n = -15, 0
+        local flag3 = false
+        local flag4 = false
+        local zero = Vector2.zero
+        local function updatePreviewCamera()
+            local position = boundsCFrame.Position
+            local cframe = CFrame.new(0, 0, value2)
+            local value4 = CFrame.Angles(0, math.rad(n), 0) * CFrame.Angles(math.rad(value3), 0, 0)
+            local value5 = CFrame.new(position) * value4 * cframe
+            camera.CFrame = CFrame.lookAt(value5.Position, position)
+        end
+        local tbl = {}
+        table.insert(tbl, viewport.InputBegan:Connect(function(input)
+            if (input.UserInputType == Enum.UserInputType.MouseButton1) or (input.UserInputType == Enum.UserInputType.Touch) then
+                flag3 = true
+                zero = input.Position
+            end
+        end))
+        table.insert(tbl, viewport.InputEnded:Connect(function(input)
+            if (input.UserInputType == Enum.UserInputType.MouseButton1) or (input.UserInputType == Enum.UserInputType.Touch) then
+                flag3 = false
+            end
+        end))
+        table.insert(tbl, viewport.InputChanged:Connect(function(input)
+            if flag3 and ((input.UserInputType == Enum.UserInputType.MouseMovement) or (input.UserInputType == Enum.UserInputType.Touch)) then
+                local value4 = input.Position - zero
+                zero = input.Position
+                n = n - (value4.X * 0.5)
+                value3 = math.clamp(value3 - (value4.Y * 0.5), -80, 80)
+            end
+            if (input.UserInputType == Enum.UserInputType.MouseWheel) and flag4 then
+                value2 = math.clamp(value2 - (input.Position.Z * 2), value * 0.5, value * 10)
+            end
+        end))
+        table.insert(tbl, viewport.MouseEnter:Connect(function()
+            flag4 = true
+        end))
+        table.insert(tbl, viewport.MouseLeave:Connect(function()
+            flag4 = false
+        end))
+        local connection = RunService.RenderStepped:Connect(function()
+            if previewClone and camera and frame5.Visible then
+                if not flag3 then
+                    n = n + 0.48
+                end
+                updatePreviewCamera()
+            end
+        end)
+        table.insert(tbl, connection)
+        local function closeFullscreenPreview()
+            for _, item2 in pairs(tbl) do
+                item2:Disconnect()
+            end
+            TweenService:Create(blur2, TweenInfo.new(0.2), {
+                Size = 0,
+            }):Play()
+            frame.Visible = true
+            frame5.Visible = false
+        end
+        button2.MouseButton1Click:Connect(closeFullscreenPreview)
+        TweenService:Create(blur2, TweenInfo.new(0.2), {
+            Size = 20,
+        }):Play()
+        frame.Visible = false
+        frame5.Visible = true
+        updatePreviewCamera()
+    end
+    local targetPlayer = Players:FindFirstChild(playerName)
+    if not targetPlayer then
+        label2.Text = "User is not in game"
+        label2.Visible = true
+        scroll.Visible = false
+    else
+        local skinsFolder2 = targetPlayer:FindFirstChild("SkinsFolder")
+        if not skinsFolder2 then
+            label2.Text = "SkinsFolder not found"
+            label2.Visible = true
+            scroll.Visible = false
+        else
+            local tbl = {}
+            for _, child in pairs(skinsFolder2:GetChildren()) do
+                local selectedItem
+                local name = child.Name
+                local count = child:FindFirstChild("Count")
+                local value = (count and count.Value) or 0
+                local knives = ReplicatedStorage.Skins:FindFirstChild("Knives")
+                local guns = ReplicatedStorage.Skins:FindFirstChild("Guns")
+                if knives then
+                    for _, child2 in pairs(knives:GetChildren()) do
+                        if (child2.Name == name) or child2.Name:find(name) or name:find(child2.Name) then
+                            selectedItem = child2
+                            break
+                        end
+                    end
+                end
+                if not selectedItem and guns then
+                    for _, child2 in pairs(guns:GetChildren()) do
+                        if (child2.Name == name) or child2.Name:find(name) or name:find(child2.Name) then
+                            selectedItem = child2
+                            break
+                        end
+                    end
+                end
+                if selectedItem then
+                    table.insert(tbl, {
+                        item = selectedItem,
+                        count = value,
+                    })
+                end
+            end
+            if #tbl == 0 then
+                label2.Text = "No items found"
+                label2.Visible = true
+                scroll.Visible = false
+            else
+                local function createItemCard(entry, index)
+                    local item = entry.item
+                    local count = entry.count
+                    local frame9 = Instance.new("Frame")
+                    frame9.Name = "ItemFrame_" .. index
+                    frame9.BackgroundColor3 = Color3.fromRGB(20, 20, 35)
+                    frame9.BorderSizePixel = 0
+                    frame9.LayoutOrder = index
+                    frame9.Parent = scroll
+                    local corner8 = Instance.new("UICorner")
+                    corner8.CornerRadius = UDim.new(0, 12)
+                    corner8.Parent = frame9
+                    local stroke3 = Instance.new("UIStroke")
+                    stroke3.Color = Color3.fromRGB(80, 80, 100)
+                    stroke3.Thickness = 1
+                    stroke3.Transparency = 0.5
+                    stroke3.Parent = frame9
+                    local button3 = Instance.new("TextButton")
+                    button3.Size = UDim2.new(1, 0, 1, 0)
+                    button3.BackgroundTransparency = 1
+                    button3.Text = ""
+                    button3.Parent = frame9
+                    local label4 = Instance.new("TextLabel")
+                    label4.Size = UDim2.new(1, -10, 0, 25)
+                    label4.Position = UDim2.new(0, 5, 0, 3)
+                    label4.BackgroundTransparency = 1
+                    label4.Text = item.Name .. " x" .. count
+                    label4.TextColor3 = Color3.fromRGB(255, 230, 200)
+                    label4.Font = Enum.Font.GothamBold
+                    label4.TextSize = 10
+                    label4.TextScaled = true
+                    label4.TextXAlignment = Enum.TextXAlignment.Center
+                    label4.ZIndex = 2
+                    label4.Parent = frame9
+                    local frame10 = Instance.new("Frame")
+                    frame10.Size = UDim2.new(1, -10, 1, -30)
+                    frame10.Position = UDim2.new(0, 5, 0, 30)
+                    frame10.BackgroundColor3 = Color3.fromRGB(25, 25, 40)
+                    frame10.BorderSizePixel = 0
+                    frame10.Parent = frame9
+                    local corner9 = Instance.new("UICorner")
+                    corner9.CornerRadius = UDim.new(0, 10)
+                    corner9.Parent = frame10
+                    local viewport2 = Instance.new("ViewportFrame")
+                    viewport2.Size = UDim2.new(1, -4, 1, -4)
+                    viewport2.Position = UDim2.new(0, 2, 0, 2)
+                    viewport2.BackgroundTransparency = 1
+                    viewport2.BorderSizePixel = 0
+                    viewport2.Parent = frame10
+                    local camera2 = Instance.new("Camera")
+                    camera2.Parent = viewport2
+                    viewport2.CurrentCamera = camera2
+                    local previewClone
+                    if item:IsA("Model") then
+                        previewClone = item:Clone()
+                        previewClone.Parent = viewport2
+                    elseif item:IsA("BasePart") then
+                        previewClone = Instance.new("Model")
+                        local primaryPart = item:Clone()
+                        primaryPart.Parent = previewClone
+                        previewClone.PrimaryPart = primaryPart
+                        previewClone.Parent = viewport2
+                    end
+                    if not previewClone then
+                        previewClone = Instance.new("Model")
+                        local part = Instance.new("Part")
+                        part.Size = Vector3.new(0.5, 2, 0.2)
+                        part.Color = Color3.fromRGB(255, 107, 53)
+                        part.Material = Enum.Material.Neon
+                        part.Parent = previewClone
+                        previewClone.PrimaryPart = part
+                        previewClone.Parent = viewport2
+                    end
+                    local boundsCFrame, boundsSize = previewClone:GetBoundingBox()
+                    local value = math.max(boundsSize.X, boundsSize.Y, boundsSize.Z)
+                    local value2 = value * 2.5
+                    local n = 0
+                    local function updateCardCamera()
+                        local position = boundsCFrame.Position
+                        local cframe = CFrame.new(0, 0, value2)
+                        local value3 = CFrame.Angles(0, math.rad(n), 0) * CFrame.Angles(math.rad(-15), 0, 0)
+                        local value4 = CFrame.new(position) * value3 * cframe
+                        camera2.CFrame = CFrame.lookAt(value4.Position, position)
+                    end
+                    RunService.RenderStepped:Connect(function()
+                        if previewClone and camera2 then
+                            n = n + 0.5
+                            updateCardCamera()
+                        end
+                    end)
+                    button3.MouseButton1Click:Connect(function()
+                        showFullscreenPreview(item, item.Name, count)
+                    end)
+                    updateCardCamera()
+                end
+                for i, item in ipairs(tbl) do
+                    createItemCard(item, i)
+                end
+            end
+        end
+    end
+    button.MouseButton1Click:Connect(function()
+        local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        local tween = TweenService:Create(frame, tweenInfo, {
+            Size = UDim2.new(0, 0, 0, 0),
+        })
+        TweenService:Create(blur, tweenInfo, {
+            Size = 0,
+        }):Play()
+        tween:Play()
+        tween.Completed:Connect(function()
+            gui:Destroy()
+            if blur then
+                blur:Destroy()
+            end
+        end)
+    end)
+    frame.Size = UDim2.new(0, 0, 0, 0)
+    local tween = TweenService:Create(frame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Size = (isMobile() and UDim2.new(0.95, 0, 0, 500)) or UDim2.new(0, 850, 0, 500),
+    })
+    tween:Play()
+end
+-- ============================================================
+-- Aim assist / auto shoot state
+-- ============================================================
+local currentWeapon = nil
+local weaponEquipped = false
+_G.BlockClick = false
+local maxAimDistance = 200
+local blockShootKey = Enum.KeyCode.F
+local clickShootEnabled = false
+local autoShootEnabled = false
+local showMobileButton = false
+local blockButtonGui = nil
+local trackedWeapons = {}
+local aimRandomness = 0.25
+local predictionTime = 0.08
+local lastShotTime = 0
+local shotCooldown = 2.15
+local minShotInterval = 0.05
+local childCache = {}
+local cacheLifetime = 0.5
+local raysUsed = 0
+local maxRaysPerSecond = 100
+local aimSettings = {
+    maxDetectionDistance = 200,
+    minDetectionDistance = 5,
+    baseRaycastCount = 5,
+    maxRaycastCount = 10,
+    raySpreadAngle = 2,
+    aimAssistStrength = 0.7,
+    allowBackwardsShooting = false,
+    predictionStrength = 0.8,
+    requireLineOfSight = true,
+    validateAssets = true,
+    checkTeam = true,
+    cameraThreshold = 0.1,
+    maxCameraAngle = 30,
+    maxRaysPerFrame = 8,
+    distanceBasedRayReduction = true,
+    adaptiveRaycasting = true,
+    screenCenterWeight = 0.4,
+    distanceWeight = 0.3,
+    visibilityWeight = 0.3,
+}
+local targetPartNames = {
+    "HumanoidRootPart",
+    "Head",
+    "UpperTorso",
+    "LowerTorso",
+    "LeftUpperArm",
+    "RightUpperArm",
+    "LeftUpperLeg",
+    "RightUpperLeg",
+}
+local function applyPlatformSettings()
+    local UserInputService = game:GetService("UserInputService")
+    local value = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+    if value then
+        aimSettings.aimAssistStrength = 0.9
+        aimSettings.maxRaycastCount = 8
+        minShotInterval = 0.07
+    else
+        aimSettings.aimAssistStrength = 0.7
+        aimSettings.maxRaycastCount = 10
+        minShotInterval = 0.05
+    end
+end
+local function trackWeapon(tool)
+    if not tool then
+        return
+    end
+    if trackedWeapons[tool] then
+        return
+    end
+    trackedWeapons[tool] = true
+    tool.AncestryChanged:Connect(function()
+        task.wait()
+        if weaponEquipped and (currentWeapon == tool) and currentWeapon and currentWeapon.Parent then
+            pcall(updateWeaponScripts)
+        end
+    end)
+    tool:GetPropertyChangedSignal("Parent"):Connect(function()
+        task.wait()
+        if weaponEquipped and (currentWeapon == tool) and currentWeapon and currentWeapon.Parent then
+            pcall(updateWeaponScripts)
+        end
+    end)
+end
+function updateWeaponScripts()
+    if not weaponEquipped then
+        return
+    end
+    if not currentWeapon or not currentWeapon.Parent or (currentWeapon:IsDescendantOf(game) == false) then
+        local character = localPlayer.Character
+        if character and character:IsDescendantOf(workspace) then
+            for _, child in ipairs(character:GetChildren()) do
+                if child:IsA("Tool") and child:FindFirstChild("fire") then
+                    currentWeapon = child
+                    weaponEquipped = true
+                    trackWeapon(currentWeapon)
+                    break
+                end
+            end
+        end
+        if not currentWeapon then
+            weaponEquipped = false
+            return
+        end
+    end
+    if not currentWeapon or not currentWeapon.Parent then
+        weaponEquipped = false
+        currentWeapon = nil
+        return
+    end
+    local ok, descendants = pcall(function()
+        return currentWeapon:GetDescendants()
+    end)
+    if not ok or not descendants then
+        currentWeapon = nil
+        weaponEquipped = false
+        return
+    end
+    table.insert(descendants, currentWeapon)
+    for _, descendant in ipairs(descendants) do
+        if descendant and (descendant:IsA("Script") or descendant:IsA("LocalScript")) and (descendant.Disabled ~= _G.BlockClick) then
+            pcall(function()
+                if currentWeapon and descendant:IsDescendantOf(currentWeapon) then
+                    descendant.Disabled = _G.BlockClick
+                end
+            end)
+        end
+    end
+    local tbl = {
+        "Script",
+        "LocalScript",
+        "Client",
+        "GunScript",
+    }
+    for _, item in ipairs(tbl) do
+        pcall(function()
+            if not currentWeapon then
+                return
+            end
+            local scriptObj = currentWeapon:FindFirstChild(item)
+            if scriptObj and (scriptObj:IsA("Script") or scriptObj:IsA("LocalScript")) then
+                if scriptObj.Disabled ~= _G.BlockClick then
+                    scriptObj.Disabled = _G.BlockClick
+                end
+            end
+        end)
+    end
+end
+function initializeWeaponScript()
+    local character = localPlayer.Character
+    if not character then
+        return false
+    end
+    for _, child in ipairs(character:GetChildren()) do
+        if child:IsA("Tool") and child:FindFirstChild("fire") then
+            currentWeapon = child
+            weaponEquipped = true
+            trackWeapon(currentWeapon)
+            if currentWeapon and currentWeapon.Parent then
+                pcall(updateWeaponScripts)
+            end
+            return true
+        end
+    end
+    local backpack2 = localPlayer:FindFirstChild("Backpack")
+    if backpack2 then
+        for _, child in ipairs(backpack2:GetChildren()) do
+            if child:IsA("Tool") and child:FindFirstChild("fire") then
+                currentWeapon = child
+                weaponEquipped = false
+                trackWeapon(currentWeapon)
+                if currentWeapon and currentWeapon.Parent then
+                    pcall(updateWeaponScripts)
+                end
+                return true
+            end
+        end
+    end
+    currentWeapon = nil
+    weaponEquipped = false
+    return false
+end
+local function getCachedChild(instance, childName)
+    local text = tostring(instance) .. "_" .. childName
+    local text2 = childCache[text]
+    if text2 and (text2.time > (tick() - cacheLifetime)) then
+        return text2.component
+    end
+    local component = instance:FindFirstChild(childName)
+    childCache[text] = {
+        component = component,
+        time = tick(),
+    }
+    return component
+end
+local function isInFrontOfCamera(worldPos)
+    local currentCamera = workspace.CurrentCamera
+    if not currentCamera then
+        return false
+    end
+    local cframe = currentCamera.CFrame
+    local lookVector = cframe.LookVector
+    local position = cframe.Position
+    local unit = (worldPos - position).Unit
+    local dot = lookVector:Dot(unit)
+    return dot > aimSettings.cameraThreshold
+end
+local function getAngleFromScreenCenter(worldPos)
+    local currentCamera = workspace.CurrentCamera
+    if not currentCamera then
+        return 180
+    end
+    local screenPos, onScreen = currentCamera:WorldToViewportPoint(worldPos)
+    if not onScreen then
+        return 180
+    end
+    local value = currentCamera.ViewportSize.X / 2
+    local value2 = currentCamera.ViewportSize.Y / 2
+    local screenX = screenPos.X
+    local screenY = screenPos.Y
+    local value3 = screenX - value
+    local value4 = screenY - value2
+    local value5 = math.deg(math.atan2(value4, value3))
+    local value6 = math.abs(value5)
+    if value6 > 180 then
+        value6 = 360 - value6
+    end
+    return value6
+end
+local function getScreenInfo(worldPos)
+    local currentCamera = workspace.CurrentCamera
+    if not currentCamera then
+        return false, Vector2.new(0, 0), 180
+    end
+    local screenPos, onScreen = currentCamera:WorldToViewportPoint(worldPos)
+    if not onScreen then
+        return false, Vector2.new(0, 0), 180
+    end
+    local vec2 = Vector2.new(screenPos.X, screenPos.Y)
+    local angle = getAngleFromScreenCenter(worldPos)
+    return true, vec2, angle
+end
+local function getAimOffset(character, rootPart, humanoid)
+    if not rootPart or not humanoid then
+        return Vector3.new(0, 0, 0)
+    end
+    local assemblyLinearVelocity = rootPart.AssemblyLinearVelocity
+    local position = rootPart.Position
+    if assemblyLinearVelocity.Magnitude > 1 then
+        position = position + (assemblyLinearVelocity * predictionTime * aimSettings.predictionStrength)
+    end
+    local value = humanoid.HipHeight + 2
+    local n = 1.2
+    local value2 = (math.random() - 0.5) * n * aimRandomness
+    local value3 = (math.random() - 0.5) * value * aimRandomness * 0.5
+    local value4 = (math.random() - 0.5) * n * aimRandomness
+    return (position - rootPart.Position) + Vector3.new(value2, value3, value4)
+end
+local function getHitboxInfo(character)
+    if not aimSettings.validateAssets then
+        return {
+            hitboxScale = 1,
+        }
+    end
+    local tbl = {
+        hitboxScale = 1,
+    }
+    local n = 0
+    for _, child in ipairs(character:GetChildren()) do
+        if child:IsA("Accessory") then
+            local handle = child:FindFirstChild("Handle")
+            if handle then
+                local size = handle.Size
+                local value = size.X * size.Y * size.Z
+                if value > 5 then
+                    n = n + 1
+                end
+            end
+        end
+    end
+    if n > 0 then
+        tbl.hitboxScale = 1 + (n * 0.2)
+    end
+    return tbl
+end
+local function getRaycastCount(distance)
+    if not aimSettings.distanceBasedRayReduction then
+        return math.min(aimSettings.baseRaycastCount, aimSettings.maxRaycastCount)
+    end
+    if distance > 150 then
+        return 3
+    elseif (distance > 100) then
+        return 4
+    elseif (distance > 50) then
+        return 5
+    else
+        return math.min(aimSettings.baseRaycastCount, aimSettings.maxRaycastCount)
+    end
+end
+local function takeRaySlot()
+    if raysUsed >= maxRaysPerSecond then
+        return false
+    end
+    raysUsed = raysUsed + 1
+    return true
+end
+game:GetService("RunService").Heartbeat:Connect(function(dt)
+    raysUsed = math.max(0, raysUsed - (maxRaysPerSecond * dt))
+end)
+local function canHitTarget(targetCharacter, origin, rayBudget)
+    if not targetCharacter or not origin then
+        return false, 0
+    end
+    local n = 0
+    local n2 = 0
+    local maxDistance = maxAimDistance
+    local hitboxInfo = getHitboxInfo(targetCharacter)
+    local hitboxScale = hitboxInfo.hitboxScale
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+    rayParams.FilterDescendantsInstances = {
+        localPlayer.Character,
+    }
+    rayParams.IgnoreWater = true
+    local value = math.min(rayBudget * #targetPartNames, aimSettings.maxRaysPerFrame)
+    for _, targetPartName in ipairs(targetPartNames) do
+        local targetPart = targetCharacter:FindFirstChild(targetPartName)
+        if targetPart and targetPart:IsA("BasePart") then
+            if not takeRaySlot() or (n2 >= value) then
+                break
+            end
+            local result = workspace:Raycast(origin, (targetPart.Position - origin).Unit * maxDistance, rayParams)
+            if result and result.Instance and result.Instance:IsDescendantOf(targetCharacter) then
+                n = n + 1
+            end
+            n2 = n2 + 1
+            local value2 = math.min(rayBudget - 1, 2)
+            for i = 1, value2 do
+                if not takeRaySlot() or (n2 >= value) then
+                    break
+                end
+                local vec = Vector3.new((math.random() - 0.5) * 0.3 * hitboxScale, (math.random() - 0.5) * 0.3 * hitboxScale, (math.random() - 0.5) * 0.3 * hitboxScale)
+                local value3 = targetPart.Position + vec
+                result = workspace:Raycast(origin, (value3 - origin).Unit * maxDistance, rayParams)
+                if result and result.Instance and result.Instance:IsDescendantOf(targetCharacter) then
+                    n = n + 1
+                end
+                n2 = n2 + 1
+            end
+        end
+    end
+    local value2 = ((n2 > 0) and (n / n2)) or 0
+    return (n > 0) and (value2 >= 0.2), value2
+end
+local function scoreTarget(targetPlayer)
+    local character = targetPlayer.Character
+    if not character then
+        return 0
+    end
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then
+        return 0
+    end
+    local currentCamera = workspace.CurrentCamera
+    if not currentCamera then
+        return 0
+    end
+    local n = 0
+    local onScreen, screenPoint, angle = getScreenInfo(humanoidRootPart.Position)
+    if onScreen then
+        local value = 1 - (angle / aimSettings.maxCameraAngle)
+        value = math.clamp(value, 0, 1)
+        n = n + (value * aimSettings.screenCenterWeight * 100)
+    else
+        return n
+    end
+    local magnitude = (currentCamera.CFrame.Position - humanoidRootPart.Position).Magnitude
+    if magnitude <= maxAimDistance then
+        local value = 1 - (magnitude / maxAimDistance)
+        n = n + (value * aimSettings.distanceWeight * 100)
+    end
+    local character2 = localPlayer.Character
+    if character2 then
+        local value = getCachedChild(character2, "HumanoidRootPart") or character2:FindFirstChild("Head")
+        if value then
+            local rayParams = RaycastParams.new()
+            rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+            rayParams.FilterDescendantsInstances = {
+                character2,
+            }
+            local result = workspace:Raycast(value.Position, (humanoidRootPart.Position - value.Position).Unit * magnitude, rayParams)
+            if not result or (result.Instance and result.Instance:IsDescendantOf(character)) then
+                n = n + (aimSettings.visibilityWeight * 100)
+            end
+        end
+    end
+    return n
+end
+local function findBestTarget()
+    local bestTarget
+    local enemies = getEnemyPlayers()
+    if not enemies or (type(enemies) ~= "table") or (#enemies == 0) then
+        return nil, 0
+    end
+    local character = localPlayer.Character
+    if not character or not character:IsDescendantOf(workspace) then
+        return nil, 0
+    end
+    local n = 0
+    for _, enemy in ipairs(enemies) do
+        if enemy and (typeof(enemy) == "Instance") and enemy:IsA("Player") then
+            local character2 = enemy.Character
+            if character2 and character2:IsDescendantOf(workspace) then
+                local humanoidRootPart = getCachedChild(character2, "HumanoidRootPart")
+                local humanoid = getCachedChild(character2, "Humanoid")
+                if humanoidRootPart and humanoid and (humanoid.Health > 0) then
+                    local currentCamera = workspace.CurrentCamera
+                    local value = (currentCamera and (currentCamera.CFrame.Position - humanoidRootPart.Position).Magnitude) or 9999
+                    if value <= maxAimDistance then
+                        local score = scoreTarget(enemy)
+                        if (score > 20) and (score > n) then
+                            n = score
+                            bestTarget = enemy
                         end
                     end
                 end
             end
         end
     end
-    return closestPlayer
+    return bestTarget, n
 end
-
--- ══════════════════════════════════════════════
---  SHARED AIM STATES
--- ══════════════════════════════════════════════
-local silentAimEnabled = false
-local autoShootEnabled = false
-
--- single RenderStepped connection, no hookmetamethod at all
-local aimConnection
-aimConnection = RunService.RenderStepped:Connect(function()
-    if not silentAimEnabled and not autoShootEnabled then return end
-    local target = getClosestPlayerToCursor(autoShootEnabled)
-    if target then
-        local root = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
-        if root then
-            Camera.CFrame = CFrame.new(Camera.CFrame.Position, root.Position)
+local function canShootAt(targetPlayer)
+    if not targetPlayer or (typeof(targetPlayer) ~= "Instance") or not targetPlayer:IsA("Player") then
+        return false
+    end
+    local now = tick()
+    if (now - lastShotTime) < minShotInterval then
+        return false
+    end
+    local character = localPlayer.Character
+    if not character or not character:IsDescendantOf(workspace) then
+        return false
+    end
+    local character2 = targetPlayer.Character
+    if not character2 or not character2:IsDescendantOf(workspace) then
+        return false
+    end
+    local value = getCachedChild(character, "HumanoidRootPart") or character:FindFirstChild("Head")
+    local humanoidRootPart = getCachedChild(character2, "HumanoidRootPart")
+    local humanoid = getCachedChild(character2, "Humanoid")
+    if not value or not humanoidRootPart or not humanoid or (humanoid.Health <= 0) then
+        return false
+    end
+    local magnitude = (value.Position - humanoidRootPart.Position).Magnitude
+    if magnitude > maxAimDistance then
+        return false
+    end
+    local inFront = isInFrontOfCamera(humanoidRootPart.Position)
+    if not inFront and not aimSettings.allowBackwardsShooting then
+        return false
+    end
+    local rayCount = getRaycastCount(magnitude)
+    local canHit, hitRatio = canHitTarget(character2, value.Position, rayCount)
+    if _G.DebugMode then
+        print(string.format("Target: %s, Distance: %.1f, CameraLooking: %s, CanHit: %s, HitRatio: %.2f", targetPlayer.Name, magnitude, tostring(inFront), tostring(canHit), hitRatio))
+    end
+    return canHit
+end
+local function isWeaponValid()
+    if not currentWeapon then
+        weaponEquipped = false
+        return false
+    end
+    local isValid = pcall(function()
+        return currentWeapon:IsDescendantOf(game) and (currentWeapon.Parent ~= nil)
+    end)
+    if not isValid then
+        currentWeapon = nil
+        weaponEquipped = false
+        return false
+    end
+    return getCachedChild(currentWeapon, "fire") ~= nil
+end
+local function tryShoot()
+    local now = tick()
+    if (now - lastShotTime) < shotCooldown then
+        return false
+    end
+    if not isWeaponValid() then
+        return false
+    end
+    local bestTarget, bestScore = findBestTarget()
+    if not bestTarget or (bestScore < 25) then
+        return false
+    end
+    if not canShootAt(bestTarget) then
+        return false
+    end
+    local character = localPlayer.Character
+    if not character or not character:IsDescendantOf(workspace) then
+        return false
+    end
+    local value = getCachedChild(character, "HumanoidRootPart") or character:FindFirstChild("Head")
+    if not value then
+        return false
+    end
+    local character2 = bestTarget.Character
+    if not character2 or not character2:IsDescendantOf(workspace) then
+        return false
+    end
+    local humanoidRootPart = getCachedChild(character2, "HumanoidRootPart")
+    local humanoid = getCachedChild(character2, "Humanoid")
+    if not humanoidRootPart or not humanoid then
+        return false
+    end
+    lastShotTime = now
+    local value2 = getCachedChild(currentWeapon, "Handle") or currentWeapon
+    if not value2 then
+        return false
+    end
+    local position = humanoidRootPart.Position
+    local aimOffset = getAimOffset(character2, humanoidRootPart, humanoid)
+    local value3 = position + aimOffset
+    local fire = getCachedChild(currentWeapon, "fire")
+    local showBeam = getCachedChild(currentWeapon, "showBeam")
+    local kill = getCachedChild(currentWeapon, "kill")
+    local localBeam = game.ReplicatedStorage.BindableEvents:FindFirstChild("LocalBeam")
+    local unit = (value3 - value2.Position).Unit
+    task.spawn(function()
+        if localBeam then
+            pcall(function()
+                localBeam:Fire(value2, value3)
+            end)
         end
+        if fire then
+            pcall(function()
+                fire:FireServer()
+            end)
+        end
+        if showBeam then
+            pcall(function()
+                showBeam:FireServer(value3, value2.Position, value2)
+            end)
+        end
+        if kill then
+            pcall(function()
+                kill:FireServer(bestTarget, unit, value3)
+            end)
+        end
+    end)
+    return true
+end
+local function getAimOffsetRandomPart(character, rootPart, humanoid)
+    if not rootPart or not humanoid then
+        return Vector3.new(0, 0, 0)
+    end
+    local assemblyLinearVelocity = rootPart.AssemblyLinearVelocity
+    local vec = Vector3.new(0, 0, 0)
+    if assemblyLinearVelocity.Magnitude > 1 then
+        vec = assemblyLinearVelocity * predictionTime * aimSettings.predictionStrength
+    end
+    local tbl = {
+        "Head",
+        "UpperTorso",
+        "LowerTorso",
+        "HumanoidRootPart",
+    }
+    local partName = tbl[math.random(1, #tbl)]
+    local part = character:FindFirstChild(partName)
+    if part and part:IsA("BasePart") then
+        local value = part.Position - rootPart.Position
+        return vec + value
+    end
+    return vec
+end
+local function updateBlockButtonColor()
+    if not blockButtonGui then
+        return
+    end
+    local blockShootButton = blockButtonGui:FindFirstChild("BlockShootButton")
+    if not blockShootButton then
+        return
+    end
+    local TweenService = game:GetService("TweenService")
+    local value = (_G.BlockClick and Color3.fromRGB(46, 204, 113)) or Color3.fromRGB(231, 76, 60)
+    local tween = TweenService:Create(blockShootButton, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        BackgroundColor3 = value,
+    })
+    tween:Play()
+    local statusLabel = blockShootButton:FindFirstChild("StatusLabel")
+    if statusLabel then
+        statusLabel.Text = (_G.BlockClick and "ON") or "OFF"
+    end
+end
+local hideBlockButton = false
+local function applyBlockButtonVisibility()
+    if not blockButtonGui then
+        return
+    end
+    local blockShootButton = blockButtonGui:FindFirstChild("BlockShootButton")
+    if not blockShootButton then
+        return
+    end
+    local icon = blockShootButton:FindFirstChild("Icon")
+    local statusLabel = blockShootButton:FindFirstChild("StatusLabel")
+    local uiStroke = blockShootButton:FindFirstChild("UIStroke")
+    local uiGradient = blockShootButton:FindFirstChild("UIGradient")
+    if hideBlockButton then
+        blockShootButton.BackgroundTransparency = 1
+        blockShootButton.TextTransparency = 1
+        if icon then
+            icon.ImageTransparency = 1
+        end
+        if statusLabel then
+            statusLabel.TextTransparency = 1
+        end
+        if uiStroke then
+            uiStroke.Transparency = 1
+        end
+        if uiGradient then
+            uiGradient.Transparency = NumberSequence.new(1)
+        end
+    else
+        blockShootButton.BackgroundTransparency = 0
+        blockShootButton.TextTransparency = 0
+        if icon then
+            icon.ImageTransparency = 0
+        end
+        if statusLabel then
+            statusLabel.TextTransparency = 0
+        end
+        if uiStroke then
+            uiStroke.Transparency = 0.6
+        end
+        if uiGradient then
+            uiGradient.Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, 0.9),
+                NumberSequenceKeypoint.new(1, 0.95),
+            })
+        end
+    end
+end
+local function createBlockButton()
+    if blockButtonGui then
+        blockButtonGui:Destroy()
+    end
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "BlockShootUI"
+    gui.ResetOnSpawn = false
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.DisplayOrder = 999
+    local button = Instance.new("TextButton")
+    button.Name = "BlockShootButton"
+    button.Size = UDim2.new(0, 55, 0, 55)
+    button.Position = UDim2.new(1, -50, 1, -120)
+    button.AnchorPoint = Vector2.new(0.5, 0.5)
+    button.BackgroundColor3 = (_G.BlockClick and Color3.fromRGB(46, 204, 113)) or Color3.fromRGB(231, 76, 60)
+    button.BackgroundTransparency = 0.25
+    button.BorderSizePixel = 0
+    button.Text = ""
+    button.AutoButtonColor = false
+    button.Parent = gui
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 14)
+    corner.Parent = button
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(255, 255, 255)
+    stroke.Thickness = 2
+    stroke.Transparency = 0.6
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.Parent = button
+    local gradient = Instance.new("UIGradient")
+    gradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 200, 200)),
+    })
+    gradient.Rotation = 90
+    gradient.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.9),
+        NumberSequenceKeypoint.new(1, 0.95),
+    })
+    gradient.Parent = button
+    local image = Instance.new("ImageLabel")
+    image.Name = "Icon"
+    image.Size = UDim2.new(0, 26, 0, 26)
+    image.Position = UDim2.new(0.5, 0, 0.5, -2)
+    image.AnchorPoint = Vector2.new(0.5, 0.5)
+    image.BackgroundTransparency = 1
+    image.Image = "rbxassetid://15403175166"
+    image.ImageColor3 = Color3.fromRGB(255, 255, 255)
+    image.Parent = button
+    local label = Instance.new("TextLabel")
+    label.Name = "StatusLabel"
+    label.Size = UDim2.new(1, 0, 0, 14)
+    label.Position = UDim2.new(0.5, 0, 1, 6)
+    label.AnchorPoint = Vector2.new(0.5, 0)
+    label.BackgroundTransparency = 1
+    label.Text = (_G.BlockClick and "ON") or "OFF"
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.TextSize = 11
+    label.Font = Enum.Font.GothamBold
+    label.TextStrokeTransparency = 0.4
+    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    label.Parent = button
+    blockButtonGui = button
+    gui.Parent = game:GetService("CoreGui")
+    button.MouseButton1Click:Connect(function()
+        _G.BlockClick = not _G.BlockClick
+        updateWeaponScripts()
+        local TweenService = game:GetService("TweenService")
+        local value = (_G.BlockClick and Color3.fromRGB(46, 204, 113)) or Color3.fromRGB(231, 76, 60)
+        local tween = TweenService:Create(button, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            BackgroundColor3 = value,
+        })
+        tween:Play()
+        local tween2 = TweenService:Create(button, TweenInfo.new(0.1, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, 85, 0, 85),
+        })
+        tween2:Play()
+        tween2.Completed:Connect(function()
+            local tween3 = TweenService:Create(button, TweenInfo.new(0.2, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out), {
+                Size = UDim2.new(0, 75, 0, 75),
+            })
+            tween3:Play()
+        end)
+        local tween3 = TweenService:Create(image, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), {
+            Rotation = image.Rotation + 90 + 270,
+        })
+        tween3:Play()
+        label.Text = (_G.BlockClick and "ON") or "OFF"
+    end)
+    gui.Parent = game:GetService("CoreGui")
+    blockButtonGui = gui
+    applyBlockButtonVisibility()
+end
+function updateBlockState()
+    local value = clickShootEnabled or autoShootEnabled
+    if not value and _G.BlockClick then
+        _G.BlockClick = false
+        updateWeaponScripts()
+        updateBlockButtonColor()
+    elseif (value and not _G.BlockClick) then
+        _G.BlockClick = true
+        updateWeaponScripts()
+        updateBlockButtonColor()
+    end
+end
+function SetClickShootState(enabled)
+    clickShootEnabled = enabled
+    if enabled then
+        _G.BlockClick = true
+        updateWeaponScripts()
+        updateBlockButtonColor()
+        if showMobileButton and not blockButtonGui then
+            createBlockButton()
+        end
+    else
+        updateBlockState()
+        if not clickShootEnabled and not autoShootEnabled and blockButtonGui then
+            blockButtonGui:Destroy()
+            blockButtonGui = nil
+        end
+    end
+end
+function SetAutoShootState(enabled)
+    autoShootEnabled = enabled
+    if enabled then
+        _G.BlockClick = true
+        updateWeaponScripts()
+        updateBlockButtonColor()
+        if showMobileButton and not blockButtonGui then
+            createBlockButton()
+        end
+    else
+        updateBlockState()
+        if not clickShootEnabled and not autoShootEnabled and blockButtonGui then
+            blockButtonGui:Destroy()
+            blockButtonGui = nil
+        end
+    end
+end
+localPlayer.CharacterAdded:Connect(function(character)
+    currentWeapon = nil
+    weaponEquipped = false
+    childCache = {}
+    character:WaitForChild("Humanoid", 5)
+    local humanoidRootPart = character:WaitForChild("HumanoidRootPart", 3)
+    if humanoidRootPart then
+        task.wait(1.5)
+        pcall(initializeWeaponScript)
+        applyPlatformSettings()
+    end
+end)
+localPlayer.CharacterAdded:Connect(function(character)
+    character.ChildAdded:Connect(function(child)
+        if child:IsA("Tool") and child:FindFirstChild("fire") then
+            task.wait(0.1)
+            currentWeapon = child
+            weaponEquipped = true
+            trackWeapon(currentWeapon)
+            pcall(updateWeaponScripts)
+        end
+    end)
+    character.ChildRemoved:Connect(function(child)
+        if child == currentWeapon then
+            weaponEquipped = false
+            currentWeapon = nil
+            task.wait(0.1)
+            pcall(initializeWeaponScript)
+        end
+    end)
+end)
+game:GetService("RunService").Heartbeat:Connect(function()
+    if currentWeapon and not currentWeapon:IsDescendantOf(game) then
+        currentWeapon = nil
+        weaponEquipped = false
+    end
+end)
+workspace.DescendantRemoving:Connect(function(descendant)
+    if descendant == currentWeapon then
+        currentWeapon = nil
+        weaponEquipped = false
+    end
+end)
+local disablePcNotifications = false
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == blockShootKey then
+        if not clickShootEnabled and not autoShootEnabled then
+            if Rayfield and not disablePcNotifications and not showMobileButton then
+                Rayfield:Notify({
+                    Title = "Block Shoot",
+                    Content = "Enable Click Shoot or Auto Shoot first!",
+                    Duration = 3,
+                    Image = 15403175166,
+                })
+            end
+            return
+        end
+        _G.BlockClick = not _G.BlockClick
+        updateWeaponScripts()
+        if Rayfield and not disablePcNotifications and not showMobileButton then
+            Rayfield:Notify({
+                Title = "Block Shoot",
+                Content = (_G.BlockClick and "Enabled") or "Disabled",
+                Duration = 2,
+                Image = 15403175166,
+            })
+        end
+        updateBlockButtonColor()
     end
 end)
 
--- ══════════════════════════════════════════════
---  BLOCK 1 — AUTO KILL ALL PLAYERS
--- ══════════════════════════════════════════════
-do
-    local running = false
-    local killCooldowns = {}
-    local KILL_COOLDOWN = 2.5
-    local equipping = false
-
-    local function inMatch()
-        return LocalPlayer:GetAttribute("Map") ~= nil
-    end
-
-    local function getGunTool()
-        local character = LocalPlayer.Character
-        local backpack = LocalPlayer:FindFirstChild("Backpack")
+-- ============================================================
+-- AimAssist tab
+-- ============================================================
+local aimAssistTab = Window:CreateTab("AimAssist", 15403121940)
+aimAssistTab:CreateLabel("If you do not know what this is, do not touch these options")
+aimAssistTab:CreateInput({
+    Name = "Aim Distance",
+    PlaceholderText = "1 - 10000",
+    RemoveTextAfterFocusLost = false,
+    CurrentValue = tostring(maxAimDistance),
+    Callback = function(value)
+        local number = tonumber(value)
+        if number then
+            maxAimDistance = math.clamp(number, 1, 10000)
+            aimSettings.maxDetectionDistance = maxAimDistance
+        end
+    end,
+})
+aimAssistTab:CreateInput({
+    Name = "Block Shoot Key",
+    PlaceholderText = "Example: F, G, H",
+    RemoveTextAfterFocusLost = false,
+    CurrentValue = blockShootKey.Name,
+    Callback = function(value)
+        local ok, keyCode = pcall(function()
+            return Enum.KeyCode[value]
+        end)
+        if ok and keyCode then
+            blockShootKey = keyCode
+        end
+    end,
+})
+aimAssistTab:CreateSlider({
+    Name = "Aim Assist Strength",
+    Range = {
+        0,
+        100,
+    },
+    Increment = 5,
+    Suffix = "%",
+    CurrentValue = aimSettings.aimAssistStrength * 100,
+    Callback = function(value)
+        aimSettings.aimAssistStrength = value / 100
+        print("Aim Assist Strength set to: " .. tostring(aimSettings.aimAssistStrength))
+    end,
+})
+aimAssistTab:CreateSlider({
+    Name = "Base Raycast Count",
+    Range = {
+        1,
+        15,
+    },
+    Increment = 1,
+    CurrentValue = aimSettings.baseRaycastCount,
+    Callback = function(value)
+        aimSettings.baseRaycastCount = value
+        print("Base Raycast Count set to: " .. tostring(value))
+    end,
+})
+aimAssistTab:CreateSlider({
+    Name = "Camera Detection Threshold",
+    Range = {
+        0,
+        50,
+    },
+    Increment = 1,
+    Suffix = "%",
+    CurrentValue = aimSettings.cameraThreshold * 100,
+    Callback = function(value)
+        aimSettings.cameraThreshold = value / 100
+        print("Camera Threshold set to: " .. tostring(aimSettings.cameraThreshold))
+    end,
+})
+aimAssistTab:CreateToggle({
+    Name = "Allow Backwards Shooting",
+    CurrentValue = aimSettings.allowBackwardsShooting,
+    Callback = function(value)
+        aimSettings.allowBackwardsShooting = value
+        print("Allow Backwards Shooting: " .. tostring(value))
+    end,
+})
+aimAssistTab:CreateToggle({
+    Name = "Debug Mode",
+    CurrentValue = false,
+    Callback = function(value)
+        _G.DebugMode = value
+        print("Debug Mode: " .. tostring(value))
+    end,
+})
+aimAssistTab:CreateLabel("Mobile Settings & PC")
+aimAssistTab:CreateToggle({
+    Name = "Mobile UI",
+    CurrentValue = false,
+    Callback = function(value)
+        showMobileButton = value
+        if value and (clickShootEnabled or autoShootEnabled) and not blockButtonGui then
+            createBlockButton()
+        elseif (not value and blockButtonGui) then
+            blockButtonGui:Destroy()
+            blockButtonGui = nil
+        end
+    end,
+})
+aimAssistTab:CreateToggle({
+    Name = "Hide Mobile Button",
+    CurrentValue = false,
+    Callback = function(value)
+        hideBlockButton = value
+        applyBlockButtonVisibility()
+    end,
+})
+aimAssistTab:CreateToggle({
+    Name = "Disable PC Notifications",
+    CurrentValue = false,
+    Callback = function(value)
+        disablePcNotifications = value
+    end,
+})
+aimAssistTab:CreateLabel("Shoot Types (For Guns)")
+aimAssistTab:CreateToggle({
+    Name = "Click Shoot",
+    CurrentValue = false,
+    Callback = function(value)
+        SetClickShootState(value)
+    end,
+})
+aimAssistTab:CreateToggle({
+    Name = "Auto Shoot",
+    CurrentValue = false,
+    Callback = function(value)
+        SetAutoShootState(value)
+    end,
+})
+if backpack then
+    backpack.ChildRemoved:Connect(function(child)
+        if not child:IsA("Tool") then
+            return
+        end
+        task.wait(0.2)
+        local character = localPlayer.Character
+        if not character then
+            return
+        end
+        local equippedTool = character:FindFirstChild(child.Name)
+        if not equippedTool then
+            return
+        end
+        if not equippedTool:FindFirstChild("fire") then
+            return
+        end
+        currentWeapon = equippedTool
+        weaponEquipped = true
+        initializeWeaponScript()
+    end)
+    backpack.ChildAdded:Connect(function(child)
+        if not child:IsA("Tool") then
+            return
+        end
+        if weaponEquipped and currentWeapon and (child.Name == currentWeapon.Name) then
+            currentWeapon = nil
+            weaponEquipped = false
+            updateWeaponScripts()
+        end
+    end)
+end
+task.spawn(function()
+    while true do
+        local character = localPlayer.Character
         if character then
-            for _, tool in ipairs(character:GetChildren()) do
-                if tool:IsA("Tool") and tool:FindFirstChild("showBeam") then
-                    return tool
+            local weaponTool = nil
+            for _, child in ipairs(character:GetChildren()) do
+                if child:IsA("Tool") and child:FindFirstChild("fire") then
+                    weaponTool = child
+                    break
                 end
             end
-        end
-        if backpack then
-            for _, tool in ipairs(backpack:GetChildren()) do
-                if tool:IsA("Tool") and tool:FindFirstChild("showBeam") then
-                    return tool
-                end
+            if weaponTool and (currentWeapon ~= weaponTool) then
+                currentWeapon = weaponTool
+                weaponEquipped = true
+                initializeWeaponScript()
+            elseif (not weaponTool and weaponEquipped) then
+                currentWeapon = nil
+                weaponEquipped = false
             end
         end
-        return nil
+        task.wait(0.1)
     end
-
-    local function equipGun()
-        if equipping then return end
-        equipping = true
-        local character = LocalPlayer.Character
-        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            local tool = getGunTool()
-            if tool and tool.Parent ~= character then
-                humanoid:EquipTool(tool)
+end)
+task.spawn(function()
+    while true do
+        if autoShootEnabled and weaponEquipped and currentWeapon and _G.BlockClick then
+            tryShoot()
+        end
+        task.wait(0.03)
+    end
+end)
+local function onMouseClick()
+    if clickShootEnabled and weaponEquipped and currentWeapon and _G.BlockClick then
+        tryShoot()
+    end
+end
+mouse.Button1Down:Connect(onMouseClick)
+task.spawn(function()
+    while true do
+        task.wait(2)
+        local now = tick()
+        for key, item in pairs(childCache) do
+            if (now - item.time) > (cacheLifetime * 2) then
+                childCache[key] = nil
             end
         end
-        task.wait(0.5)
-        equipping = false
     end
+end)
+applyPlatformSettings()
 
-    LocalPlayer.CharacterAdded:Connect(function()
-        task.wait(2.5)
-        if running and inMatch() then equipGun() end
-    end)
-
-    local backpack1 = LocalPlayer:WaitForChild("Backpack")
-    backpack1.ChildAdded:Connect(function(child)
-        if running and inMatch() and child:IsA("Tool") and child:FindFirstChild("showBeam") then
+-- ============================================================
+-- Invisibility tab
+-- ============================================================
+local invisibilityTab = Window:CreateTab("Invisibility", 15402913667)
+_G.InvisibilityEnabled = true
+local localPlayerInv = game.Players.LocalPlayer
+local character = localPlayerInv.Character or localPlayerInv.CharacterAdded:Wait()
+local isInvisible = false
+character.Archivable = true
+local clone
+invisibilityTab:CreateLabel("Auto-Give Cloak - Keeps cloak in backpack automatically")
+local autoGiveCloak = false
+invisibilityTab:CreateToggle({
+    Name = "Auto-Give Cloak",
+    CurrentValue = false,
+    Flag = "AutoGiveCloak",
+    Callback = function(value)
+        autoGiveCloak = value
+    end,
+})
+local function startInvisibility()
+    if invisibilityConnection then
+        invisibilityConnection:Disconnect()
+        invisibilityConnection = nil
+    end
+    local bodyVelocity = character:FindFirstChild("HumanoidRootPart"):FindFirstChild("BodyVelocity")
+    if bodyVelocity then
+        bodyVelocity.P = 0
+        bodyVelocity.MaxForce = Vector3.new(0, 0, 0)
+    end
+    clone = character:Clone()
+    for _, descendant in pairs(clone:GetDescendants()) do
+        if descendant:IsA("BodyVelocity") or descendant:IsA("BodyGyro") or descendant:IsA("BodyPosition") then
+            descendant:Destroy()
+        end
+        if descendant:IsA("BasePart") and (descendant.Transparency < 1) then
+            descendant.Transparency = 0.85
+        end
+    end
+    local bodyVelocity2 = Instance.new("BodyVelocity")
+    bodyVelocity2.MaxForce = Vector3.new(500000, 500000, 500000)
+    bodyVelocity2.Velocity = Vector3.new(0, 0, 0)
+    bodyVelocity2.Parent = clone.HumanoidRootPart
+    clone.Parent = workspace
+    clone.HumanoidRootPart.CFrame = character.HumanoidRootPart.CFrame
+    clone.Humanoid.WalkSpeed = character.Humanoid.WalkSpeed * 2
+    clone.HumanoidRootPart.Anchored = false
+    local animator = character:FindFirstChildOfClass("Animator")
+    if animator then
+        animator:Clone().Parent = clone
+    end
+    for _, child in pairs(character:GetChildren()) do
+        if child:IsA("LocalScript") then
+            local scriptClone = child:Clone()
+            scriptClone.Disabled = true
+            scriptClone.Parent = clone
+        end
+    end
+    workspace.CurrentCamera.CameraSubject = clone.Humanoid
+    isInvisible = true
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local value = character.HumanoidRootPart.CFrame + Vector3.new(0, 100000000, 0)
+    task.spawn(function()
+        for i = 1, 90 do
+            if isInvisible then
+                character.HumanoidRootPart.CFrame = value
+            end
             task.wait(0.1)
-            equipGun()
         end
     end)
+    task.wait(0.1)
+    invisibilityConnection = RunService.RenderStepped:Connect(function()
+        if not _G.InvisibilityEnabled then
+            return
+        end
+        if not isInvisible then
+            return
+        end
+        local moveDirection = humanoid.MoveDirection
+        if moveDirection.Magnitude > 0 then
+            bodyVelocity2.Parent = nil
+            local currentCamera = workspace.CurrentCamera
+            local lookVector = currentCamera.CFrame.LookVector
+            local flag = lookVector:Dot(moveDirection) < 0
+            local value2 = (flag and (lookVector.Y * -1.4)) or (lookVector.Y * 1.8)
+            local value3 = (flag and 1.4) or 1.6
+            local unit = Vector3.new(moveDirection.X, value2 + 0.35, moveDirection.Z).Unit
+            clone.HumanoidRootPart.Velocity = unit * clone.Humanoid.WalkSpeed * value3
+        else
+            bodyVelocity2.Parent = clone.HumanoidRootPart
+        end
+    end)
+end
+local function stopInvisibility()
+    if not isInvisible then
+        return
+    end
+    character.HumanoidRootPart.Velocity = Vector3.new()
+    for _, descendant in pairs(clone:GetDescendants()) do
+        if descendant:IsA("BasePart") and (descendant.Transparency < 1) then
+            descendant.Transparency = 1
+        end
+    end
+    isInvisible = false
+    for i = 1, 5 do
+        character.HumanoidRootPart.CFrame = clone.HumanoidRootPart.CFrame
+        task.wait()
+    end
+    clone:Destroy()
+    workspace.CurrentCamera.CameraSubject = character.Humanoid
+    if invisibilityConnection then
+        invisibilityConnection:Disconnect()
+        invisibilityConnection = nil
+    end
+end
+local function giveCloakToolUnused()
+    local invisibilityCloak = localPlayerInv.Backpack:FindFirstChild("Invisibility Cloak")
+    local value = localPlayerInv.Character and localPlayerInv.Character:FindFirstChild("Invisibility Cloak")
+    if not invisibilityCloak and not value then
+        local tool = Instance.new("Tool")
+        tool.Name = "Invisibility Cloak"
+        tool.RequiresHandle = false
+        tool.Parent = localPlayerInv.Backpack
+        tool.Equipped:Connect(function()
+            if not isInvisible and _G.InvisibilityEnabled then
+                startInvisibility()
+            end
+        end)
+        tool.Unequipped:Connect(function()
+            if isInvisible then
+                stopInvisibility()
+            end
+        end)
+        return true
+    end
+    return false
+end
+local function giveCloakTool()
+    local invisibilityCloak = localPlayerInv.Backpack:FindFirstChild("Invisibility Cloak")
+    local value = localPlayerInv.Character and localPlayerInv.Character:FindFirstChild("Invisibility Cloak")
+    if not invisibilityCloak and not value then
+        local tool = Instance.new("Tool")
+        tool.Name = "Invisibility Cloak"
+        tool.RequiresHandle = false
+        tool.Parent = localPlayerInv.Backpack
+        tool.Equipped:Connect(function()
+            if not isInvisible and _G.InvisibilityEnabled then
+                startInvisibility()
+            end
+        end)
+        tool.Unequipped:Connect(function()
+            if isInvisible then
+                stopInvisibility()
+            end
+        end)
+        return true
+    end
+    return false
+end
+invisibilityTab:CreateLabel("Invisibility Cloak - Press button to get the cloak tool")
+invisibilityTab:CreateButton({
+    Name = "Get Invisibility Cloak",
+    Callback = function()
+        if giveCloakTool() then
+            Rayfield:Notify({
+                Title = "Invisibility",
+                Content = "Cloak added to your backpack!",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        else
+            Rayfield:Notify({
+                Title = "Invisibility",
+                Content = "You already have a cloak in your inventory!",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end
+    end,
+})
+invisibilityTab:CreateButton({
+    Name = "Remove Cloak",
+    Callback = function()
+        local flag = false
+        for _, child in pairs(localPlayerInv.Backpack:GetChildren()) do
+            if child.Name == "Invisibility Cloak" then
+                child:Destroy()
+                flag = true
+            end
+        end
+        if localPlayerInv.Character then
+            local invisibilityCloak = localPlayerInv.Character:FindFirstChild("Invisibility Cloak")
+            if invisibilityCloak then
+                invisibilityCloak:Destroy()
+                flag = true
+            end
+        end
+        if flag then
+            Rayfield:Notify({
+                Title = "Invisibility",
+                Content = "Cloak removed from your inventory!",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        else
+            Rayfield:Notify({
+                Title = "Invisibility",
+                Content = "No cloak found in your inventory!",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end
+    end,
+})
+task.spawn(function()
+    while true do
+        if autoGiveCloak then
+            giveCloakTool()
+        end
+        task.wait(1)
+    end
+end)
+localPlayerInv.CharacterAdded:Connect(function(character2)
+    character = character2
+    character.Archivable = true
+    if autoGiveCloak then
+        giveCloakTool()
+    end
+end)
 
-    GunTab:CreateToggle({
-        Text = "Auto Kill All Players",
-        Default = false,
-        Callback = function(state)
-            running = state
-            if running then
-                task.spawn(function()
-                    while running do
-                        task.wait(math.random() * 0.06 + 0.08)
-                        if not inMatch() then continue end
-                        local character = LocalPlayer.Character
-                        local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-                        if not rootPart then continue end
-                        local equippedTool = character:FindFirstChildOfClass("Tool")
-                        if not equippedTool or not equippedTool:FindFirstChild("showBeam") then
-                            equipGun()
+-- ============================================================
+-- Kill tab
+-- ============================================================
+local killTab = Window:CreateTab("Kill", 15403116835)
+killTab:CreateLabel("Kill All Players")
+killTab:CreateButton({
+    Name = "Kill Everyone (Add Winned Rounds - Depending Alive Enemies)",
+    Callback = function()
+        for _, plr in pairs(Players:GetPlayers()) do
+            if plr ~= localPlayer then
+                if KnifeKill then
+                    KnifeKill:FireServer(plr)
+                end
+            end
+        end
+        if Rayfield then
+            Rayfield:Notify({
+                Title = "Kill All",
+                Content = "Tried to kill all players!",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end
+    end,
+})
+local function findGunInBackpack()
+    for _, child in ipairs(localPlayer.Backpack:GetChildren()) do
+        if child:FindFirstChild("kill") then
+            return child
+        end
+    end
+    return nil
+end
+killTab:CreateButton({
+    Name = "Kill Everyone (Gun In Backpack) (Does Not Add Won Rounds)",
+    Callback = function()
+        local gun = findGunInBackpack()
+        if not gun then
+            return
+        end
+        local enemies = getEnemyPlayers()
+        for _, enemy in ipairs(enemies) do
+            local position = gun.Handle.Position
+            local vec = Vector3.new(0, 0, 0)
+            pcall(function()
+                local unit = (vec - position).Unit
+                gun.kill:FireServer(enemy, unit, vec)
+            end)
+        end
+        if Rayfield then
+            Rayfield:Notify({
+                Title = "Kill Everyone",
+                Content = "Tried to kill all enemies!",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end
+    end,
+})
+local killSpamEnabled = false
+local killSpamReady = false
+killTab:CreateToggle({
+    Name = "Kill Spam (Add Winned Rounds - Depending Alive Enemies)",
+    CurrentValue = false,
+    Flag = "KillSpam",
+    Image = 15403175166,
+    Callback = function(value)
+        if not killSpamReady then
+            killSpamReady = true
+            return
+        end
+        killSpamEnabled = value
+        if killSpamEnabled then
+            task.spawn(function()
+                while killSpamEnabled do
+                    for _, plr in pairs(Players:GetPlayers()) do
+                        if plr ~= localPlayer then
+                            KnifeKill:FireServer(plr)
                         end
-                        local myTeam = LocalPlayer:GetAttribute("Team")
-                        local closestPlayer = nil
-                        local shortestDistance = MAX_DISTANCE
-                        for _, player in ipairs(Players:GetPlayers()) do
-                            if player ~= LocalPlayer then
-                                if player:GetAttribute("Team") ~= myTeam then
-                                    local enemyChar = player.Character
-                                    local enemyRoot = enemyChar and enemyChar:FindFirstChild("HumanoidRootPart")
-                                    if enemyRoot then
-                                        local dist = (enemyRoot.Position - rootPart.Position).Magnitude
-                                        if dist <= MAX_DISTANCE and dist < shortestDistance then
-                                            shortestDistance = dist
-                                            closestPlayer = player
-                                        end
-                                    end
-                                end
+                    end
+                    task.wait(0.01)
+                end
+            end)
+            Rayfield:Notify({
+                Title = "Kill Spam",
+                Content = "Started!",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        else
+            Rayfield:Notify({
+                Title = "Kill Spam",
+                Content = "Stopped!",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end
+    end,
+})
+killTab:CreateLabel("Kill Single Player")
+local selectedKillTarget = nil
+local function getOtherPlayerNames()
+    local tbl = {}
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= localPlayer then
+            table.insert(tbl, plr.Name)
+        end
+    end
+    return tbl
+end
+local killTargetDropdown = killTab:CreateDropdown({
+    Name = "Select Player",
+    Options = getOtherPlayerNames(),
+    CurrentOption = {},
+    Flag = "PlayerDropdown",
+    Callback = function(value)
+        selectedKillTarget = Players:FindFirstChild(value[1])
+    end,
+})
+Players.PlayerAdded:Connect(function()
+    killTargetDropdown:Set(getOtherPlayerNames())
+end)
+Players.PlayerRemoving:Connect(function()
+    killTargetDropdown:Set(getOtherPlayerNames())
+end)
+killTab:CreateButton({
+    Name = "Kill Player",
+    Callback = function()
+        if selectedKillTarget then
+            KnifeKill:FireServer(selectedKillTarget)
+            Rayfield:Notify({
+                Title = "Knife Kill",
+                Content = "Tried to kill " .. selectedKillTarget.Name .. "!",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        else
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Select a player first!",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end
+    end,
+})
+
+-- ============================================================
+-- Inventory tab
+-- ============================================================
+local inventoryTab = Window:CreateTab("Inventory", 15403400185)
+inventoryTab:CreateLabel("View Player Inventory")
+local selectedInventoryPlayer = nil
+local function getAllPlayerNames()
+    local tbl = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        table.insert(tbl, plr.Name)
+    end
+    return tbl
+end
+local inventoryDropdown = inventoryTab:CreateDropdown({
+    Name = "Select Player",
+    Options = getAllPlayerNames(),
+    CurrentOption = {},
+    Flag = "InventoryDropdown",
+    Callback = function(value)
+        selectedInventoryPlayer = Players:FindFirstChild(value[1])
+    end,
+})
+local function refreshInventoryDropdown()
+    local value = (selectedInventoryPlayer and selectedInventoryPlayer.Name) or nil
+    inventoryDropdown:Set(getAllPlayerNames())
+    if value and Players:FindFirstChild(value) then
+        inventoryDropdown:Set({
+            value,
+        })
+        selectedInventoryPlayer = Players:FindFirstChild(value)
+    else
+        selectedInventoryPlayer = nil
+    end
+end
+Players.PlayerAdded:Connect(refreshInventoryDropdown)
+Players.PlayerRemoving:Connect(refreshInventoryDropdown)
+inventoryTab:CreateButton({
+    Name = "View Inventory",
+    Callback = function()
+        if selectedInventoryPlayer then
+            openItemViewer(selectedInventoryPlayer.Name)
+            Rayfield:Notify({
+                Title = "Inventory Viewer",
+                Content = "Opening inventory for " .. selectedInventoryPlayer.Name .. "!",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        else
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Select a player first!",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end
+    end,
+})
+inventoryTab:CreateLabel("Fix Trading Inventory")
+inventoryTab:CreateButton({
+    Name = "Trade Fix",
+    Callback = function()
+        local Players = game:GetService("Players")
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local localPlayer5 = Players.LocalPlayer
+        local tradeItem = ReplicatedStorage:WaitForChild("TradeItem")
+        local itemsHolderFrame = localPlayer5.PlayerGui.Main.MainInventoryFrame.ItemsHolderFrame
+        local itemsHolderFrame2 = localPlayer5.PlayerGui.Main.MainTradingFrame.ItemsHolderFrame
+        local yourOfferFrame = localPlayer5.PlayerGui.Main.MainTradingFrame.Slots.YourOfferFrame
+        local emptySlotTemplate
+        local value = localPlayer5.PlayerGui:FindFirstChild("Main") and localPlayer5.PlayerGui.Main:FindFirstChild("MainTradingFrame")
+        if not (value and value.Visible) then
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "You are not in a trade!",
+                Duration = 3,
+                Image = 15403175166,
+            })
+            return
+        end
+        local tradingPlayerName = value.Slots.TradingPlayerName
+        local text = tradingPlayerName.Text
+        local partnerName = text:match("%(@(.+)%)")
+        local partner = Players:FindFirstChild(partnerName)
+        if not partner then
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Target player not found!",
+                Duration = 3,
+                Image = 15403175166,
+            })
+            return
+        end
+        local function cacheEmptySlotTemplate()
+            if emptySlotTemplate then
+                return
+            end
+            local value2 = yourOfferFrame:FindFirstChild("EmptySlot4") or yourOfferFrame:FindFirstChild("EmptySlot3") or yourOfferFrame:FindFirstChild("EmptySlot2") or yourOfferFrame:FindFirstChild("EmptySlot1")
+            if value2 then
+                emptySlotTemplate = value2:Clone()
+            end
+        end
+        local function normalizeOfferSlots()
+            if not emptySlotTemplate then
+                warn("emptySlotTemplate es nil")
+                return
+            end
+            if not yourOfferFrame then
+                warn("yourOfferFrame es nil")
+                return
+            end
+            local tbl = {}
+            local n = 0
+            local tbl2 = {}
+            for _, child in ipairs(yourOfferFrame:GetChildren()) do
+                local name = child.Name
+                local slotIndex = name:match("^EmptySlot(%d+)$")
+                if slotIndex then
+                    slotIndex = tonumber(slotIndex)
+                    if not tbl[slotIndex] then
+                        tbl[slotIndex] = true
+                        table.insert(tbl2, child)
+                    else
+                        child:Destroy()
+                    end
+                elseif name:match("^Item") then
+                    n = n + 1
+                end
+            end
+            local slotCount = #tbl2
+            local value2 = n + slotCount
+            if value2 > 4 then
+                local value3 = value2 - 4
+                for i = 1, value3 do
+                    if tbl2[i] then
+                        tbl2[i]:Destroy()
+                    end
+                end
+            elseif (value2 < 4) then
+                local value3 = 4 - value2
+                for i = 1, 4 do
+                    if value3 <= 0 then
+                        break
+                    end
+                    if not tbl[i] then
+                        local slotClone = emptySlotTemplate:Clone()
+                        slotClone.Name = "EmptySlot" .. i
+                        slotClone.Parent = yourOfferFrame
+                        tbl[i] = true
+                        value3 = value3 - 1
+                    end
+                end
+            end
+        end
+        local function getTradePartnerPlayer()
+            local mainTradingFrame2 = localPlayer5.PlayerGui.Main:FindFirstChild("MainTradingFrame")
+            if not (mainTradingFrame2 and mainTradingFrame2.Visible) then
+                return nil
+            end
+            local tradingPlayerName2 = mainTradingFrame2.Slots.TradingPlayerName
+            if not tradingPlayerName2 then
+                return nil
+            end
+            local text2 = tradingPlayerName2.Text
+            local partnerName2 = text2:match("%(@(.+)%)")
+            if not partnerName2 then
+                return nil
+            end
+            return Players:FindFirstChild(partnerName2)
+        end
+        local function getTradeItemNames()
+            local tbl = {}
+            for _, child in ipairs(itemsHolderFrame2:GetChildren()) do
+                tbl[child.Name] = true
+            end
+            return tbl
+        end
+        local function findEmptySlot()
+            for i = 1, 4 do
+                local emptySlot = yourOfferFrame:FindFirstChild("EmptySlot" .. i)
+                if emptySlot then
+                    return emptySlot
+                end
+            end
+            return nil
+        end
+        local function bindRemoveButton(itemFrame, itemName)
+            local value2 = itemFrame:FindFirstChild("Button") or itemFrame:FindFirstChildWhichIsA("TextButton")
+            if not value2 then
+                return
+            end
+            value2.MouseButton1Click:Connect(function()
+                local partner2 = getTradePartnerPlayer()
+                if not partner2 then
+                    return
+                end
+                tradeItem:InvokeServer("REMOVE_FROM_TRADE", partner2, itemName, {
+                    OurItems = {},
+                    TheirItems = {},
+                })
+                local existingItem = itemsHolderFrame2:FindFirstChild("Item" .. itemName)
+                if existingItem then
+                    local itemCountValue = existingItem:FindFirstChild("ItemCountValue")
+                    local value3 = existingItem:FindFirstChild("ItemCount") or existingItem:FindFirstChild("Count") or existingItem:FindFirstChildWhichIsA("TextLabel")
+                    if itemCountValue and value3 then
+                        itemCountValue.Value = itemCountValue.Value + 1
+                        value3.Text = tostring(itemCountValue.Value)
+                    end
+                else
+                    local template = itemsHolderFrame:FindFirstChild(itemName)
+                    if template then
+                        local itemClone = template:Clone()
+                        itemClone.Name = "Item" .. itemName
+                        itemClone.Parent = itemsHolderFrame2
+                        pcall(function()
+                            itemClone.Visible = true
+                        end)
+                        local value3 = itemClone:FindFirstChild("ItemCount") or itemClone:FindFirstChild("Count") or itemClone:FindFirstChildWhichIsA("TextLabel")
+                        if value3 then
+                            local intValue = Instance.new("IntValue")
+                            intValue.Name = "ItemCountValue"
+                            intValue.Value = 1
+                            intValue.Parent = itemClone
+                            value3.Text = "1"
+                        end
+                        setupAddButton(itemClone, itemName)
+                    end
+                end
+                itemFrame:Destroy()
+                normalizeOfferSlots()
+            end)
+        end
+        local function bindAddButton(itemFrame, itemName)
+            local value2 = itemFrame:FindFirstChild("Button") or itemFrame:FindFirstChildWhichIsA("TextButton")
+            if not value2 then
+                return
+            end
+            value2.MouseButton1Click:Connect(function()
+                cacheEmptySlotTemplate()
+                local partner2 = getTradePartnerPlayer()
+                if not partner2 then
+                    return
+                end
+                local emptySlot = findEmptySlot()
+                if not emptySlot then
+                    return
+                end
+                local itemCountValue = itemFrame:FindFirstChild("ItemCountValue")
+                local value3 = itemFrame:FindFirstChild("ItemCount") or itemFrame:FindFirstChild("Count") or itemFrame:FindFirstChildWhichIsA("TextLabel")
+                if not itemCountValue or not value3 then
+                    return
+                end
+                if itemCountValue.Value <= 0 then
+                    return
+                end
+                tradeItem:InvokeServer("ADD_TO_TRADE", partner2, itemName, {
+                    OurItems = {},
+                    TheirItems = {},
+                })
+                itemCountValue.Value = itemCountValue.Value - 1
+                value3.Text = tostring(itemCountValue.Value)
+                local template = itemsHolderFrame:FindFirstChild(itemName)
+                if template then
+                    local slotItem = template:Clone()
+                    slotItem.Name = "Item" .. itemName
+                    slotItem.Parent = yourOfferFrame
+                    slotItem.Position = emptySlot.Position
+                    slotItem.Size = UDim2.new(0.218994126, 0, 0.843777716, 0)
+                    slotItem.BackgroundTransparency = 0
+                    slotItem.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+                    local itemImage = slotItem:FindFirstChild("ItemImage")
+                    if itemImage then
+                        itemImage.BackgroundTransparency = 0
+                        itemImage.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+                    end
+                    for _, child in ipairs(slotItem:GetChildren()) do
+                        if child:IsA("TextLabel") and (child.Name:match("ItemCount") or child.Name:match("Count")) then
+                            child:Destroy()
+                        elseif (child:IsA("IntValue") and child.Name:match("ItemCountValue")) then
+                            child:Destroy()
+                        end
+                    end
+                    bindRemoveButton(slotItem, itemName)
+                    emptySlot:Destroy()
+                end
+                if itemCountValue.Value <= 0 then
+                    itemFrame:Destroy()
+                end
+            end)
+        end
+        cacheEmptySlotTemplate()
+        local existingItems = getTradeItemNames()
+        for _, child in ipairs(itemsHolderFrame:GetChildren()) do
+            if child:IsA("Frame") or child:IsA("ImageLabel") then
+                local name = child.Name
+                local text2 = "Item" .. name
+                if not existingItems[text2] then
+                    local itemClone = child:Clone()
+                    itemClone.Name = text2
+                    itemClone.Parent = itemsHolderFrame2
+                    pcall(function()
+                        itemClone.Visible = true
+                    end)
+                    local value2 = itemClone:FindFirstChild("ItemCount") or itemClone:FindFirstChild("Count") or itemClone:FindFirstChildWhichIsA("TextLabel")
+                    if value2 then
+                        local intValue = Instance.new("IntValue")
+                        intValue.Name = "ItemCountValue"
+                        intValue.Value = tonumber(value2.Text) or 1
+                        intValue.Parent = itemClone
+                        value2.Text = tostring(intValue.Value)
+                    end
+                    bindAddButton(itemClone, name)
+                end
+            end
+        end
+        normalizeOfferSlots()
+        Rayfield:Notify({
+            Title = "Trade Fix",
+            Content = "Trading system initialized!",
+            Duration = 3,
+            Image = 15403175166,
+        })
+    end,
+})
+
+-- ============================================================
+-- Boxes tab
+-- ============================================================
+local boxesTab = Window:CreateTab("Boxes", 15403012566)
+boxesTab:CreateLabel("Open Boxes")
+local selectedBox = nil
+local boxDropdown = boxesTab:CreateDropdown({
+    Name = "Select Box",
+    Options = {
+        "Knife Box #1",
+        "Knife Box #2",
+        "Gun Box #1",
+        "Gun Box #2",
+        "Mythic Box #1",
+        "Mythic Box #2",
+        "Mythic Box #3",
+        "Mythic Box #4",
+    },
+    CurrentOption = {},
+    Callback = function(value)
+        selectedBox = value[1]
+    end,
+})
+boxesTab:CreateButton({
+    Name = "Open Selected Box",
+    Callback = function()
+        if not selectedBox then
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Select a box first!",
+                Duration = 3,
+                Image = 15403175166,
+            })
+            return
+        end
+        local ok, success = pcall(function()
+            buyCaseRemote:InvokeServer(selectedBox)
+        end)
+        if ok then
+            Rayfield:Notify({
+                Title = "Box Opener",
+                Content = "Opened " .. selectedBox .. "!",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        else
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to open box",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end
+    end,
+})
+
+-- ============================================================
+-- Equip tab
+-- ============================================================
+local equipTab = Window:CreateTab("Equip", 15403144723)
+equipTab:CreateLabel("Equip Weapons")
+local selectedWeapon = nil
+local selectedWeaponType = nil
+local function getEquipOptions()
+    local tbl = {}
+    for _, child in pairs(localPlayer:WaitForChild("SkinsFolder"):GetChildren()) do
+        table.insert(tbl, child.Name)
+    end
+    return tbl
+end
+local equipDropdown = equipTab:CreateDropdown({
+    Name = "Select Weapon",
+    Options = getEquipOptions(),
+    CurrentOption = {},
+    Callback = function(value)
+        selectedWeapon = value[1]
+    end,
+})
+localPlayer.SkinsFolder.ChildAdded:Connect(function()
+    equipDropdown:Set(getEquipOptions())
+end)
+localPlayer.SkinsFolder.ChildRemoved:Connect(function()
+    equipDropdown:Set(getEquipOptions())
+end)
+equipTab:CreateDropdown({
+    Name = "Select Type",
+    Options = {
+        "Knife",
+        "Gun",
+    },
+    CurrentOption = {},
+    Callback = function(value)
+        selectedWeaponType = value[1]
+    end,
+})
+equipTab:CreateButton({
+    Name = "Equip Selected",
+    Callback = function()
+        if selectedWeapon and selectedWeaponType then
+            local ok, result = pcall(function()
+                equipItemRemote:InvokeServer(selectedWeapon, selectedWeaponType)
+            end)
+            if ok then
+                Rayfield:Notify({
+                    Title = "Equip",
+                    Content = "Equipped " .. selectedWeapon .. " as " .. selectedWeaponType .. "!",
+                    Duration = 3,
+                    Image = 15403175166,
+                })
+            else
+                Rayfield:Notify({
+                    Title = "Error",
+                    Content = "Failed to equip!",
+                    Duration = 3,
+                    Image = 15403175166,
+                })
+            end
+        else
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Select both weapon and type!",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end
+    end,
+})
+
+-- ============================================================
+-- Hitbox tab
+-- ============================================================
+local hitboxTab = Window:CreateTab("Hitbox", 15403203770)
+hitboxTab:CreateLabel("Hitbox Expander")
+_G.HeadSize = nil
+_G.Disabled = false
+_G.Transparency = nil
+_G.SelectedColor = nil
+_G.Originals = {}
+_G.AntiWall = false
+local wallVisibility = {}
+local function isVisibleFromCamera(part)
+    local currentCamera = Workspace.CurrentCamera
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+    rayParams.FilterDescendantsInstances = {
+        localPlayer.Character,
+    }
+    local result = Workspace:Raycast(currentCamera.CFrame.Position, part.Position - currentCamera.CFrame.Position, rayParams)
+    if not result then
+        return true
+    end
+    return result.Instance:IsDescendantOf(part.Parent)
+end
+local function applyHitbox(targetPlayer)
+    if targetPlayer == localPlayer then
+        return
+    end
+    local character2 = targetPlayer.Character
+    if not character2 then
+        return
+    end
+    local humanoidRootPart = character2:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then
+        return
+    end
+    if _G.AntiWall and (wallVisibility[targetPlayer.Name] == false) then
+        local original = _G.Originals[targetPlayer.Name]
+        if original then
+            humanoidRootPart.Size = original.Size
+            humanoidRootPart.Transparency = original.Transparency
+            humanoidRootPart.BrickColor = original.Color
+            humanoidRootPart.Material = original.Material
+            humanoidRootPart.CanCollide = true
+        end
+        return
+    end
+    if _G.Disabled then
+        if not _G.Originals[targetPlayer.Name] then
+            _G.Originals[targetPlayer.Name] = {
+                Size = humanoidRootPart.Size,
+                Transparency = humanoidRootPart.Transparency,
+                Color = humanoidRootPart.BrickColor,
+                Material = humanoidRootPart.Material,
+            }
+        end
+        if _G.HeadSize then
+            humanoidRootPart.Size = Vector3.new(_G.HeadSize, _G.HeadSize, _G.HeadSize)
+        end
+        if _G.Transparency then
+            humanoidRootPart.Transparency = _G.Transparency
+        end
+        if _G.SelectedColor then
+            humanoidRootPart.BrickColor = BrickColor.new(_G.SelectedColor)
+        end
+        humanoidRootPart.Material = Enum.Material.Neon
+        humanoidRootPart.CanCollide = false
+    else
+        local original = _G.Originals[targetPlayer.Name]
+        if original then
+            humanoidRootPart.Size = original.Size
+            humanoidRootPart.Transparency = original.Transparency
+            humanoidRootPart.BrickColor = original.Color
+            humanoidRootPart.Material = original.Material
+            humanoidRootPart.CanCollide = true
+        end
+    end
+end
+local function trackPlayerHitbox(targetPlayer)
+    wallVisibility[targetPlayer.Name] = false
+    targetPlayer.CharacterAdded:Connect(function()
+        task.wait(0.15)
+        applyHitbox(targetPlayer)
+    end)
+    if targetPlayer.Character then
+        applyHitbox(targetPlayer)
+    end
+end
+for _, plr in pairs(Players:GetPlayers()) do
+    trackPlayerHitbox(plr)
+end
+Players.PlayerAdded:Connect(trackPlayerHitbox)
+task.spawn(function()
+    while true do
+        if _G.AntiWall then
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= localPlayer then
+                    local character2 = plr.Character
+                    local value = character2 and character2:FindFirstChild("HumanoidRootPart")
+                    if value then
+                        wallVisibility[plr.Name] = isVisibleFromCamera(value)
+                    end
+                end
+            end
+        end
+        task.wait(0.15)
+    end
+end)
+task.spawn(function()
+    while true do
+        for _, plr in ipairs(Players:GetPlayers()) do
+            applyHitbox(plr)
+        end
+        task.wait(0.16)
+    end
+end)
+hitboxTab:CreateToggle({
+    Name = "Enable Hitbox",
+    CurrentValue = false,
+    Callback = function(value)
+        _G.Disabled = value
+        for _, plr in pairs(Players:GetPlayers()) do
+            applyHitbox(plr)
+        end
+    end,
+})
+hitboxTab:CreateToggle({
+    Name = "Anti Wall Shot",
+    CurrentValue = false,
+    Callback = function(value)
+        _G.AntiWall = value
+    end,
+})
+hitboxTab:CreateDropdown({
+    Name = "Choose Color",
+    Options = {
+        "Gray",
+        "Bright red",
+        "Bright blue",
+        "Bright yellow",
+        "Bright green",
+        "White",
+        "Black",
+    },
+    CurrentOption = {},
+    Callback = function(value)
+        _G.SelectedColor = value[1]
+        for _, plr in pairs(Players:GetPlayers()) do
+            applyHitbox(plr)
+        end
+    end,
+})
+hitboxTab:CreateInput({
+    Name = "Head Size",
+    PlaceholderText = "1 - 50",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(value)
+        local number = tonumber(value)
+        _G.HeadSize = (number and math.clamp(number, 1, 50)) or nil
+        for _, plr in pairs(Players:GetPlayers()) do
+            applyHitbox(plr)
+        end
+    end,
+})
+hitboxTab:CreateInput({
+    Name = "Transparency",
+    PlaceholderText = "0 - 1",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(value)
+        local number = tonumber(value)
+        _G.Transparency = (number and math.clamp(number, 0, 1)) or nil
+        for _, plr in pairs(Players:GetPlayers()) do
+            applyHitbox(plr)
+        end
+    end,
+})
+
+-- ============================================================
+-- Trading tab
+-- ============================================================
+local tradingTab = Window:CreateTab("Trading", 15403180857)
+tradingTab:CreateLabel("Trade Scam - Add Fake Items only if you have 1 item of the added")
+local selectedTradeItem = nil
+local function getSkinNames()
+    local tbl = {}
+    for _, child in pairs(localPlayer:WaitForChild("SkinsFolder"):GetChildren()) do
+        table.insert(tbl, child.Name)
+    end
+    return tbl
+end
+local tradeItemDropdown = tradingTab:CreateDropdown({
+    Name = "Select Weapon",
+    Options = getSkinNames(),
+    CurrentOption = {},
+    Callback = function(value)
+        selectedTradeItem = value[1]
+    end,
+})
+localPlayer.SkinsFolder.ChildAdded:Connect(function()
+    tradeItemDropdown:Set(getSkinNames())
+end)
+localPlayer.SkinsFolder.ChildRemoved:Connect(function()
+    tradeItemDropdown:Set(getSkinNames())
+end)
+local fakeAddAmount = 1
+local fakeRemoveAmount = 1
+tradingTab:CreateInput({
+    Name = "Amount to Add",
+    PlaceholderText = "Ex: 5",
+    Callback = function(value)
+        local number = tonumber(value)
+        if number then
+            fakeAddAmount = number
+        end
+    end,
+})
+tradingTab:CreateInput({
+    Name = "Amount to Remove",
+    PlaceholderText = "Ex: 3",
+    Callback = function(value)
+        local number = tonumber(value)
+        if number then
+            fakeRemoveAmount = number
+        end
+    end,
+})
+tradingTab:CreateButton({
+    Name = "Add Fake Items",
+    Callback = function()
+        local value = localPlayer.PlayerGui:FindFirstChild("Main") and localPlayer.PlayerGui.Main:FindFirstChild("MainTradingFrame")
+        if not (value and value.Visible) then
+            return Rayfield:Notify({
+                Title = "Error",
+                Content = "You are not in a trade",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end
+        if not selectedTradeItem then
+            return Rayfield:Notify({
+                Title = "Error",
+                Content = "Select an item first",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end
+        local text = value.Slots.TradingPlayerName.Text
+        local partnerName = text:match("%(@(.+)%)")
+        local partner = Players:FindFirstChild(partnerName)
+        if not partner then
+            return Rayfield:Notify({
+                Title = "Error",
+                Content = "Could not find target player",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end
+        for i = 1, fakeAddAmount do
+            tradeItemRemote2:InvokeServer("ADD_TO_TRADE", partner, selectedTradeItem, {
+                OurItems = {
+                    selectedTradeItem,
+                },
+                TheirItems = {},
+            })
+            task.wait(0.5)
+        end
+        Rayfield:Notify({
+            Title = "Trade",
+            Content = "Added x" .. fakeAddAmount .. " " .. selectedTradeItem,
+            Duration = 3,
+            Image = 15403175166,
+        })
+    end,
+})
+tradingTab:CreateButton({
+    Name = "Remove Fake Items",
+    Callback = function()
+        local value = localPlayer.PlayerGui:FindFirstChild("Main") and localPlayer.PlayerGui.Main:FindFirstChild("MainTradingFrame")
+        if not (value and value.Visible) then
+            return Rayfield:Notify({
+                Title = "Error",
+                Content = "You are not in a trade",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end
+        if not selectedTradeItem then
+            return Rayfield:Notify({
+                Title = "Error",
+                Content = "Select an item first",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end
+        local text = value.Slots.TradingPlayerName.Text
+        local partnerName = text:match("%(@(.+)%)")
+        local partner = Players:FindFirstChild(partnerName)
+        if not partner then
+            return Rayfield:Notify({
+                Title = "Error",
+                Content = "Could not find target player",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end
+        for i = 1, fakeRemoveAmount do
+            tradeItemRemote2:InvokeServer("REMOVE_FROM_TRADE", partner, selectedTradeItem, {
+                OurItems = {
+                    selectedTradeItem,
+                },
+                TheirItems = {},
+            })
+            task.wait(0.5)
+        end
+        Rayfield:Notify({
+            Title = "Trade",
+            Content = "Removed x" .. fakeRemoveAmount .. " " .. selectedTradeItem,
+            Duration = 3,
+            Image = 15403175166,
+        })
+    end,
+})
+tradingTab:CreateLabel("Spam Trade Requests")
+local selectedTradePlayer = nil
+local flagTradeUi = true
+local function getPlayerNamesForTrade()
+    local tbl = {}
+    table.insert(tbl, "None")
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= localPlayer then
+            table.insert(tbl, plr.Name)
+        end
+    end
+    return tbl
+end
+local tradePlayerDropdown = tradingTab:CreateDropdown({
+    Name = "Select Player",
+    CurrentOption = {},
+    Options = getPlayerNamesForTrade(),
+    Flag = "TraderDropdown",
+    Callback = function(value)
+        if flagTradeUi then
+            flagTradeUi = false
+            return
+        end
+        local selectedName = value[1]
+        if selectedName == "None" then
+            selectedTradePlayer = nil
+        else
+            selectedTradePlayer = Players:FindFirstChild(selectedName)
+        end
+        Rayfield:Notify({
+            Image = 15403175166,
+            Title = "Spam Trade",
+            Content = "Selected: " .. ((selectedTradePlayer and selectedTradePlayer.Name) or "None"),
+            Duration = 3,
+        })
+    end,
+})
+Players.PlayerAdded:Connect(refreshInventoryDropdown)
+Players.PlayerRemoving:Connect(refreshInventoryDropdown)
+tradingTab:CreateButton({
+    Name = "Spam 50 Trades",
+    Callback = function()
+        if not selectedTradePlayer then
+            Rayfield:Notify({
+                Image = 15403175166,
+                Title = "Error",
+                Content = "Select a player first!",
+                Duration = 3,
+            })
+            return
+        end
+        task.spawn(function()
+            for i = 1, 50 do
+                game:GetService("ReplicatedStorage").Trade:FireServer("SENT", selectedTradePlayer)
+                task.wait(0.2)
+            end
+            Rayfield:Notify({
+                Image = 15403175166,
+                Title = " Trade",
+                Content = "Finished sending 50 trades to " .. selectedTradePlayer.Name,
+                Duration = 3,
+            })
+        end)
+    end,
+})
+tradingTab:CreateLabel("Trade Utils")
+tradingTab:CreateToggle({
+    Name = "Break Limit to 200 Items",
+    CurrentValue = false,
+    Callback = function(value)
+        local isItemSlot
+        local isEmptySlot
+        _G.TradeSlotSpam = value
+        local localPlayer5 = game:GetService("Players").LocalPlayer
+        local yourOfferFrame = localPlayer5.PlayerGui.Main.MainTradingFrame.Slots.YourOfferFrame
+        local emptySlot1 = yourOfferFrame:FindFirstChild("EmptySlot1")
+        local str = "EmptySlot4"
+        local n = 200
+        if not _G.TradeClonados then
+            _G.TradeClonados = {}
+        end
+        if not _G.TradeHeartbeatConnection then
+            _G.TradeHeartbeatConnection = nil
+        end
+        function isItemSlot(instance)
+            return (typeof(instance) == "Instance") and instance:IsA("Frame") and (instance.Name:sub(1, 4) == "Item")
+        end
+        function isEmptySlot(instance)
+            return (typeof(instance) == "Instance") and instance:IsA("Frame") and (instance.Name:sub(1, 5) == "Empty")
+        end
+        if value then
+            for _, tradeClonado in ipairs(_G.TradeClonados) do
+                if tradeClonado and tradeClonado.Parent then
+                    tradeClonado:Destroy()
+                end
+            end
+            _G.TradeClonados = {}
+            for i = 5, n do
+                local slotClone = emptySlot1:Clone()
+                slotClone.Name = str
+                slotClone.Parent = yourOfferFrame
+                if slotClone:FindFirstChild("Index") then
+                    slotClone.Index.Value = 4
+                end
+                slotClone.Visible = false
+                _G.TradeClonados[#_G.TradeClonados + 1] = slotClone
+            end
+            if not _G.TradeHeartbeatConnection then
+                _G.TradeHeartbeatConnection = game:GetService("RunService").Heartbeat:Connect(function()
+                    local n2 = 0
+                    for _, child in ipairs(yourOfferFrame:GetChildren()) do
+                        if isEmptySlot(child) then
+                            child.Visible = false
+                        elseif isItemSlot(child) then
+                            n2 = n2 + 1
+                            if n2 <= 4 then
+                                child.Visible = true
+                            else
+                                child.Visible = false
                             end
                         end
-                        local tool = character:FindFirstChildOfClass("Tool")
-                        if closestPlayer and tool then
-                            local killEvent = tool:FindFirstChild("kill")
-                            if killEvent and killEvent:IsA("RemoteEvent") then
-                                local enemyChar = closestPlayer.Character
-                                if enemyChar and canSeeTarget(enemyChar) then
-                                    local now = tick()
-                                    local lastKill = killCooldowns[closestPlayer.UserId] or 0
-                                    if now - lastKill >= KILL_COOLDOWN then
-                                        killCooldowns[closestPlayer.UserId] = now
-                                        killEvent:FireServer(closestPlayer, randomSpread())
-                                    end
-                                end
-                            end
+                    end
+                    for _, tradeClonado in ipairs(_G.TradeClonados) do
+                        if tradeClonado and (tradeClonado.Parent == yourOfferFrame) then
+                            tradeClonado.Visible = false
                         end
                     end
                 end)
             end
+        else
+            if _G.TradeHeartbeatConnection then
+                _G.TradeHeartbeatConnection:Disconnect()
+                _G.TradeHeartbeatConnection = nil
+            end
+            for _, tradeClonado in ipairs(_G.TradeClonados) do
+                if tradeClonado and tradeClonado.Parent then
+                    tradeClonado:Destroy()
+                end
+            end
+            _G.TradeClonados = {}
         end
-    })
+        Rayfield:Notify({
+            Title = "Trade Limit",
+            Content = (value and "200 Items Limit Activated!") or "200 Items Limit Deactivated!",
+            Duration = 3,
+            Image = 15403175166,
+        })
+    end,
+})
+local partnerSkinsFolder = nil
+local effectItemCache = nil
+local function isTradeOpen()
+    return mainTradingFrame and mainTradingFrame.Visible
 end
-
--- ══════════════════════════════════════════════
---  BLOCK 2 — AUTO SHOOT WHEN VISIBLE
--- ══════════════════════════════════════════════
-do
-    local FIRE_DELAY_MIN = 0.10
-    local FIRE_DELAY_MAX = 0.16
-    local equipping2 = false
-
-    local function getGunTool2()
-        local character = LocalPlayer.Character
-        local backpack = LocalPlayer:FindFirstChild("Backpack")
-        if character then
-            for _, tool in ipairs(character:GetChildren()) do
-                if tool:IsA("Tool") and tool:FindFirstChild("showBeam") and tool:FindFirstChild("kill") then
-                    return tool
-                end
-            end
-        end
-        if backpack then
-            for _, tool in ipairs(backpack:GetChildren()) do
-                if tool:IsA("Tool") and tool:FindFirstChild("showBeam") and tool:FindFirstChild("kill") then
-                    return tool
-                end
-            end
-        end
+local function getTradePartner()
+    if not isTradeOpen() then
         return nil
     end
-
-    local function equipGun2()
-        if equipping2 then return nil end
-        equipping2 = true
-        local character = LocalPlayer.Character
-        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            local tool = getGunTool2()
-            if tool and tool.Parent ~= character then
-                humanoid:EquipTool(tool)
-                task.wait(0.05)
+    local text = mainTradingFrame.Slots.TradingPlayerName.Text
+    local partnerName = text:match("@(.+)%)")
+    if partnerName then
+        return Players:FindFirstChild(partnerName)
+    end
+    return nil
+end
+local function getEffectItems()
+    if not effectItemCache then
+        effectItemCache = {}
+        for key, item in pairs(ItemModule) do
+            if item.ItemType == "Effect" then
+                effectItemCache[key] = true
             end
         end
-        task.wait(0.5)
-        equipping2 = false
-        return getGunTool2()
     end
-
-    LocalPlayer.CharacterAdded:Connect(function()
-        task.wait(2.5)
-        if autoShootEnabled then equipGun2() end
-    end)
-
-    local backpack2 = LocalPlayer:WaitForChild("Backpack")
-    backpack2.ChildAdded:Connect(function(child)
-        if autoShootEnabled and child:IsA("Tool") and child:FindFirstChild("showBeam") then
-            task.wait(0.1)
-            equipGun2()
+    return effectItemCache
+end
+local emptyOffer = {
+    OurItems = {},
+    TheirItems = {},
+}
+local function isPartnerConfirmed()
+    if not isTradeOpen() then
+        return false
+    end
+    return mainTradingFrame.Slots.TheirOfferCONFIRM.Visible
+end
+tradingTab:CreateLabel("Give 1 of each item")
+local minItemCount = 1
+local giveAmount = 1
+tradingTab:CreateInput({
+    Name = "Minimum items of each one",
+    PlaceholderText = "Ex: 50",
+    Callback = function(value)
+        local number = tonumber(value)
+        if number then
+            minItemCount = number
         end
-    end)
-
-    task.spawn(function()
-        while true do
-            task.wait(math.random() * (FIRE_DELAY_MAX - FIRE_DELAY_MIN) + FIRE_DELAY_MIN)
-            if not autoShootEnabled then continue end
-            if not LocalPlayer:GetAttribute("Map") then continue end
-            local target = getClosestPlayerToCursor(true)
-            if target then
-                local character = LocalPlayer.Character
-                local tool = character and character:FindFirstChildOfClass("Tool")
-                if tool and tool:FindFirstChild("showBeam") then
-                    tool:Activate()
+    end,
+})
+tradingTab:CreateInput({
+    Name = "Amount to give",
+    PlaceholderText = "Ex: 100",
+    Callback = function(value)
+        local number = tonumber(value)
+        if number then
+            giveAmount = number
+        end
+    end,
+})
+tradingTab:CreateButton({
+    Name = "Give",
+    Callback = function()
+        if not isTradeOpen() then
+            return Rayfield:Notify({
+                Title = "Error",
+                Content = "Trade UI is closed",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end
+        local partner = getTradePartner()
+        if not partner then
+            return Rayfield:Notify({
+                Title = "Error",
+                Content = "Partner not found",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end
+        partnerSkinsFolder = partner:FindFirstChild("SkinsFolder")
+        local effectItems = getEffectItems()
+        local tbl = {}
+        for _, child in pairs(skinsFolder:GetChildren()) do
+            local name = child.Name
+            if (name ~= "DefaultGun") and (name ~= "DefaultKnife") and (name ~= "Revolver_Default") and not effectItems[name] then
+                local count = child:FindFirstChild("Count")
+                if count then
+                    local value = count.Value
+                    if value >= minItemCount then
+                        table.insert(tbl, name)
+                    end
                 end
             end
         end
-    end)
-
-    GunTab:CreateToggle({
-        Text = "Auto Shoot When Visible",
-        Default = false,
-        Callback = function(state)
-            autoShootEnabled = state
-            if state then equipGun2() end
+        if #tbl == 0 then
+            return Rayfield:Notify({
+                Title = "Error",
+                Content = "No valid items found",
+                Duration = 3,
+                Image = 15403175166,
+            })
         end
-    })
+        local tbl2 = {}
+        for _, item in ipairs(tbl) do
+            for i = 1, giveAmount do
+                tbl2[#tbl2 + 1] = coroutine.create(function()
+                    tradeItemRemote:InvokeServer("ADD_TO_TRADE", partner, item, emptyOffer)
+                end)
+            end
+        end
+        for _, item in ipairs(tbl2) do
+            coroutine.resume(item)
+        end
+        task.wait(0.5)
+        Rayfield:Notify({
+            Title = "Trade",
+            Content = "Added " .. #tbl .. " items (" .. (giveAmount * #tbl) .. " total). Confirmating trade, this may take some seconds...",
+            Duration = 3,
+            Image = 15403175166,
+        })
+        tradeItemRemote:InvokeServer("CONFIRM", partner)
+    end,
+})
+
+-- ============================================================
+-- ESP tab
+-- ============================================================
+local espTab = Window:CreateTab("ESP", 15403375395)
+espTab:CreateLabel("ESP Enemy Team")
+local espEnabled = false
+local espHighlights = {}
+local function notify(title, content, duration)
+    if Rayfield and Rayfield.Notify then
+        Rayfield:Notify({
+            Title = title,
+            Content = content,
+            Duration = duration or 3,
+            Image = 15403175166,
+        })
+    end
+end
+local function stripEspSuffix(text)
+    return (string.gsub(text, "_trupismendil", ""))
+end
+local function removeHighlight(targetPlayer)
+    local targetPlayer2 = espHighlights[targetPlayer]
+    if targetPlayer2 then
+        pcall(function()
+            targetPlayer2:Destroy()
+        end)
+        espHighlights[targetPlayer] = nil
+    end
+end
+local function applyHighlight(targetPlayer, color)
+    local character2 = targetPlayer.Character
+    if not character2 then
+        return
+    end
+    if not character2:FindFirstChild("HumanoidRootPart") then
+        return
+    end
+    local targetPlayer2 = espHighlights[targetPlayer]
+    if not targetPlayer2 or (targetPlayer2.Parent == nil) or (targetPlayer2.Adornee ~= character2) then
+        if targetPlayer2 then
+            pcall(function()
+                targetPlayer2:Destroy()
+            end)
+        end
+        targetPlayer2 = Instance.new("Highlight")
+        targetPlayer2.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        targetPlayer2.FillTransparency = 0.5
+        targetPlayer2.OutlineColor = Color3.fromRGB(255, 255, 255)
+        targetPlayer2.Parent = character2
+        espHighlights[targetPlayer] = targetPlayer2
+    end
+    targetPlayer2.Adornee = character2
+    targetPlayer2.FillColor = color
+end
+local function getTeamFrames2()
+    local ok, redFrame, blueFrame = pcall(function()
+        local playerGui2 = localPlayer:FindFirstChildOfClass("PlayerGui")
+        if not playerGui2 then
+            return nil, nil
+        end
+        local main = playerGui2:FindFirstChild("Main")
+        if not main then
+            return nil, nil
+        end
+        local mainGameFrame = main:FindFirstChild("MainGameFrame")
+        if not mainGameFrame then
+            return nil, nil
+        end
+        local playersFrame = mainGameFrame:FindFirstChild("PlayersFrame")
+        if not playersFrame then
+            return nil, nil
+        end
+        return playersFrame:FindFirstChild("TeamRedFrame"), playersFrame:FindFirstChild("TeamBlueFrame")
+    end)
+    if not ok or not redFrame or not blueFrame then
+        return nil, nil
+    end
+    return redFrame, blueFrame
+end
+local function getFrameNames2(frame)
+    local tbl = {}
+    for _, child in ipairs(frame:GetChildren()) do
+        if child:IsA("Frame") then
+            table.insert(tbl, child.Name)
+        end
+    end
+    return tbl
+end
+local function getEspTargets()
+    local redFrame, blueFrame = getTeamFrames2()
+    if not redFrame or not blueFrame then
+        return nil, nil
+    end
+    local redNames = getFrameNames2(redFrame)
+    local blueNames = getFrameNames2(blueFrame)
+    local flag, flag2 = false, false
+    local tbl, tbl2 = {}, {}
+    for _, redName in ipairs(redNames) do
+        local name = stripEspSuffix(redName)
+        tbl[name] = true
+        if name == localPlayer.Name then
+            flag = true
+        end
+    end
+    for _, blueName in ipairs(blueNames) do
+        local name = stripEspSuffix(blueName)
+        tbl2[name] = true
+        if name == localPlayer.Name then
+            flag2 = true
+        end
+    end
+    if not flag and not flag2 then
+        return nil, nil
+    end
+    local color, nameSet = nil
+    if flag then
+        nameSet = tbl2
+        color = Color3.fromRGB(0, 0, 255)
+    else
+        nameSet = tbl
+        color = Color3.fromRGB(255, 0, 0)
+    end
+    local tbl3 = {}
+    for key, _ in pairs(nameSet) do
+        local targetPlayer = Players:FindFirstChild(key)
+        if targetPlayer and (targetPlayer ~= localPlayer) then
+            table.insert(tbl3, targetPlayer)
+        end
+    end
+    return tbl3, color
+end
+local function refreshEsp()
+    if not espEnabled then
+        return
+    end
+    local targets, color = getEspTargets()
+    if not targets or not color then
+        for key, _ in pairs(espHighlights) do
+            removeHighlight(key)
+        end
+        return
+    end
+    for key, _ in pairs(espHighlights) do
+        local flag = table.find(targets, key) ~= nil
+        if not flag then
+            removeHighlight(key)
+        end
+    end
+    for _, target in ipairs(targets) do
+        applyHighlight(target, color)
+    end
+end
+espTab:CreateToggle({
+    Name = "Enable ESP",
+    CurrentValue = false,
+    Callback = function(value)
+        espEnabled = value
+        if not espEnabled then
+            for _, plr in pairs(Players:GetPlayers()) do
+                removeHighlight(plr)
+            end
+        else
+            refreshEsp()
+        end
+    end,
+})
+RunService.RenderStepped:Connect(function()
+    if espEnabled then
+        pcall(refreshEsp)
+    end
+end)
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function()
+        if espEnabled then
+            task.defer(refreshEsp)
+        end
+    end)
+end)
+Players.PlayerRemoving:Connect(function(player)
+    removeHighlight(player)
+end)
+localPlayer.CharacterAdded:Connect(function()
+    if espEnabled then
+        task.wait(0.5)
+        refreshEsp()
+    end
+end)
+local function enableAntiAfk()
+    if shared.__AntiAFKAlreadyRan then
+        return
+    end
+    shared.__AntiAFKAlreadyRan = true
+    localPlayer.Idled:Connect(function()
+        VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+        task.wait(1)
+        VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+    end)
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "AFK_Notice"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.Parent = localPlayer:WaitForChild("PlayerGui")
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 280, 0, 50)
+    frame.Position = UDim2.new(0.5, 0, 0, 20)
+    frame.AnchorPoint = Vector2.new(0.5, 0)
+    frame.BackgroundColor3 = Color3.fromRGB(30, 35, 40)
+    frame.BorderSizePixel = 0
+    frame.BackgroundTransparency = 0.1
+    frame.ZIndex = 1
+    frame.Parent = gui
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(100, 200, 100)
+    stroke.Thickness = 1.5
+    stroke.Transparency = 0.3
+    stroke.Parent = frame
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.Position = UDim2.new(0, 0, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = "Anti-AFK Enabled"
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 15
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.TextXAlignment = Enum.TextXAlignment.Center
+    label.TextStrokeTransparency = 0.5
+    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    label.ZIndex = 2
+    label.Parent = frame
+    frame.BackgroundTransparency = 1
+    label.TextTransparency = 1
+    TweenService:Create(frame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        BackgroundTransparency = 0.1,
+    }):Play()
+    TweenService:Create(label, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        TextTransparency = 0,
+    }):Play()
+    task.delay(4, function()
+        local tween = TweenService:Create(frame, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+            BackgroundTransparency = 1,
+        })
+        local tween2 = TweenService:Create(label, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+            TextTransparency = 1,
+        })
+        tween:Play()
+        tween2:Play()
+        tween.Completed:Wait()
+        gui:Destroy()
+    end)
+    print("Anti-AFK auto enabled.")
 end
 
--- ══════════════════════════════════════════════
---  BLOCK 3 — SILENT AIM
--- ══════════════════════════════════════════════
-GunTab:CreateToggle({
-    Text = "Silent Aim",
-    Default = false,
-    Callback = function(state)
-        silentAimEnabled = state
+-- ============================================================
+-- Streak Farm tab
+-- ============================================================
+local streakTab = Window:CreateTab("Streak Farm", 15402939288)
+streakTab:CreateLabel("User AFK Side")
+streakTab:CreateButton({
+    Name = "User Side Start",
+    Callback = function()
+        enableAntiAfk()
+        spawn(function()
+            while true do
+                local ok, frame = pcall(function()
+                    return localPlayer.PlayerGui.Main.MainStarterPackFrame
+                end)
+                if ok and frame and (frame.Visible == true) then
+                    frame.Visible = false
+                    Rayfield:Notify({
+                        Image = 15403175166,
+                        Title = "Streak Farm",
+                        Content = "StarterPackFrame hidden",
+                        Duration = 3,
+                    })
+                end
+                task.wait(0.1)
+            end
+        end)
+        spawn(function()
+            local vec = Vector3.new(-302, 69, 6)
+            local n = 1
+            while true do
+                local value = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+                local humanoidRootPart = value:FindFirstChild("HumanoidRootPart")
+                if humanoidRootPart then
+                    humanoidRootPart.CFrame = CFrame.new(vec)
+                end
+                task.wait(n)
+            end
+        end)
+        spawn(function()
+            while true do
+                local tbl = {
+                    [1] = "REMOVE",
+                }
+                game:GetService("ReplicatedStorage").SetStatePlr:FireServer(unpack(tbl))
+                task.wait(0.1)
+            end
+        end)
+        spawn(function()
+            while true do
+                local ok, frame = pcall(function()
+                    return localPlayer.PlayerGui.Main.MainGameFrame:WaitForChild("EndScreen")
+                end)
+                if ok and frame and (frame.Visible == true) then
+                    frame.Visible = false
+                    Rayfield:Notify({
+                        Image = 15403175166,
+                        Title = "Streak Farm",
+                        Content = "EndScreen closed",
+                        Duration = 2,
+                    })
+                end
+                task.wait(0.2)
+            end
+        end)
+    end,
+})
+streakTab:CreateLabel("AFK Streak Farmer")
+local selectedStreakTarget = nil
+local function getStreakPlayers()
+    local tbl = {}
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= localPlayer then
+            table.insert(tbl, plr.Name)
+        end
     end
+    return tbl
+end
+local streakDropdown = streakTab:CreateDropdown({
+    Name = "Select Player",
+    Options = getStreakPlayers(),
+    CurrentOption = {},
+    Callback = function(value)
+        selectedStreakTarget = value[1]
+    end,
+})
+Players.PlayerAdded:Connect(function()
+    streakDropdown:Set(getStreakPlayers())
+end)
+Players.PlayerRemoving:Connect(function()
+    streakDropdown:Set(getStreakPlayers())
+end)
+streakTab:CreateButton({
+    Name = "AFK Streak Start",
+    Callback = function()
+        enableAntiAfk()
+        if not selectedStreakTarget then
+            Rayfield:Notify({
+                Image = 15403175166,
+                Title = "Error",
+                Content = "Select a player first!",
+                Duration = 3,
+            })
+            return
+        end
+        local targetCharacter, humanoidRootPart
+        local function showAntiAfkNotice(arg1)
+            targetCharacter = arg1
+            humanoidRootPart = targetCharacter:WaitForChild("HumanoidRootPart")
+        end
+        showAntiAfkNotice(localPlayer.Character or localPlayer.CharacterAdded:Wait())
+        localPlayer.CharacterAdded:Connect(showAntiAfkNotice)
+        local playerGui2 = localPlayer:WaitForChild("PlayerGui")
+        local main = playerGui2:WaitForChild("Main")
+        local mainVotingFrame = main:WaitForChild("MainVotingFrame")
+        local endScreen = main.MainGameFrame:WaitForChild("EndScreen")
+        spawn(function()
+            while true do
+                repeat
+                    task.wait(0.1)
+                until humanoidRootPart
+                pcall(function()
+                    humanoidRootPart.CFrame = CFrame.new(-310, 69, 7)
+                end)
+                repeat
+                    task.wait(0.1)
+                until pcall(function()
+                    return mainVotingFrame.Visible
+                end) and mainVotingFrame.Visible
+                repeat
+                    task.wait(0.1)
+                until pcall(function()
+                    return mainVotingFrame.Visible
+                end) and not mainVotingFrame.Visible
+                task.wait(2)
+                while true do
+                    local flag = false
+                    pcall(function()
+                        if endScreen.Visible then
+                            flag = true
+                        end
+                    end)
+                    if flag then
+                        break
+                    end
+                    pcall(function()
+                        KnifeKill:FireServer(Players:FindFirstChild(selectedStreakTarget))
+                    end)
+                    task.wait(0.4)
+                end
+                repeat
+                    pcall(function()
+                        endScreen.Visible = false
+                        game:GetService("ReplicatedStorage").SetStatePlr:FireServer("REMOVE")
+                    end)
+                    task.wait(0.3)
+                until pcall(function()
+                    return endScreen.Visible
+                end) and not endScreen.Visible
+            end
+        end)
+    end,
 })
 
--- ══════════════════════════════════════════════
---  UI SETTINGS TAB
--- ══════════════════════════════════════════════
-Tab3:CreateDivider("Theme")
-Tab3:CreateDropdown({
-    Text     = "UI Theme",
-    Options  = { "Default", "Red", "Green", "Purple", "Cyan", "Blue", "Pink", "Yellow", "Teal", "Magenta", "Orange", "Rose", "Gold" },
-    Default  = "Teal",
-    Callback = function(theme) Window:SetTheme(theme) end,
+-- ============================================================
+-- Misc tab
+-- ============================================================
+local miscTab = Window:CreateTab("Misc", 15403059251)
+miscTab:CreateLabel("If you reset in the match, enemies can't kill you, the game doesn't count it as a death. (But your character will be disarmed)")
+miscTab:CreateButton({
+    Name = "Enable Reset",
+    Callback = function()
+        local StarterGui = game:GetService("StarterGui")
+        pcall(function()
+            StarterGui:SetCore("ResetButtonCallback", true)
+        end)
+        pcall(function()
+            Rayfield:Notify({
+                Title = "Misc",
+                Content = "Reset enabled! Forcing respawn...",
+                Duration = 3,
+                Image = 15403175166,
+            })
+        end)
+    end,
 })
-Tab3:CreateDivider("UI")
-Tab3:CreateKeybind({
-    Text     = "Toggle UI",
-    Default  = Enum.KeyCode.P,
-    Callback = function(key) Window:SetToggleKey(key) end,
+miscTab:CreateLabel("Server Things")
+miscTab:CreateButton({
+    Name = "Change Server",
+    Callback = function()
+        Rayfield:Notify({
+            Title = "Misc",
+            Content = "Rejoining...",
+            Duration = 3,
+            Image = 15403175166,
+        })
+        local TeleportService = game:GetService("TeleportService")
+        local Players = game:GetService("Players")
+        local localPlayer5 = Players.LocalPlayer
+        TeleportService:Teleport(game.PlaceId, localPlayer5)
+    end,
+})
+miscTab:CreateLabel("FastDex UI Phone")
+miscTab:CreateButton({
+    Name = "Hide Open Button",
+    Callback = function()
+        local findRayfieldGui
+        local hidePromptTitle
+        local CoreGui = game:GetService("CoreGui")
+        function findRayfieldGui()
+            for _, child in ipairs(CoreGui:GetChildren()) do
+                if child:FindFirstChild("Rayfield") then
+                    return child.Rayfield
+                end
+            end
+            return nil
+        end
+        local result = findRayfieldGui()
+        if not result then
+            warn("Rayfield UI not found.")
+            return
+        end
+        function hidePromptTitle(prompt)
+            if not prompt or not prompt:FindFirstChild("Title") then
+                return
+            end
+            prompt.Title.Visible = false
+            prompt.BackgroundTransparency = 1
+            prompt.Title:GetPropertyChangedSignal("Visible"):Connect(function()
+                if prompt.Title.Visible then
+                    prompt.Title.Visible = false
+                end
+            end)
+            prompt:GetPropertyChangedSignal("BackgroundTransparency"):Connect(function()
+                if prompt.BackgroundTransparency ~= 1 then
+                    prompt.BackgroundTransparency = 1
+                end
+            end)
+        end
+        local prompt = result:FindFirstChild("Prompt")
+        if prompt then
+            hidePromptTitle(prompt)
+        end
+        result.ChildAdded:Connect(function(child)
+            if child.Name == "Prompt" then
+                hidePromptTitle(child)
+            end
+        end)
+        print("FastDex prompts hidden (CoreGui auto-detect).")
+    end,
 })
