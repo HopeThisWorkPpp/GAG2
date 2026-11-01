@@ -15,11 +15,45 @@ local services = {
     soundService = game:GetService("SoundService")
 }
 
+-- find Network wherever the game put it
+local function findNetwork()
+    -- common paths, tries each in order
+    local paths = {
+        function() return services.replicatedStorage.Modules.Network end,
+        function() return services.replicatedStorage.Network end,
+        function() return services.replicatedStorage:WaitForChild("Modules", 5) and services.replicatedStorage.Modules:WaitForChild("Network", 5) end,
+        function() return services.replicatedStorage:FindFirstChild("Network", true) end,
+    }
+    for _, try in ipairs(paths) do
+        local ok, result = pcall(try)
+        if ok and result then
+            local ok2, mod = pcall(require, result)
+            if ok2 and mod then return mod end
+        end
+    end
+    -- fallback: deep search
+    local function deepFind(parent, name, depth)
+        depth = depth or 0
+        if depth > 4 then return nil end
+        for _, child in ipairs(parent:GetChildren()) do
+            if child.Name == name then return child end
+            local found = deepFind(child, name, depth + 1)
+            if found then return found end
+        end
+    end
+    local found = deepFind(services.replicatedStorage, "Network")
+    if found then
+        local ok, mod = pcall(require, found)
+        if ok then return mod end
+    end
+    error("[Silence] Network module not found — check ReplicatedStorage structure")
+end
+
 local player = {
     player = services.players.LocalPlayer,
     name = services.players.LocalPlayer.Name,
     displayName = services.players.LocalPlayer.DisplayName,
-    network = require(services.replicatedStorage.Modules.Network),
+    network = findNetwork(),
     rebirths = require(services.replicatedStorage.Game.Rebirths),
     replication = require(services.replicatedStorage.Game.Replication),
 }
