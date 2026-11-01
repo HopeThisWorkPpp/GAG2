@@ -1,33 +1,32 @@
 --[[
     Silence - Tap Simulator
     by Henrik @xyzhenrik
-    Fully patched - Flattened UI, CDN Fallback, Trade Drain included
+    Fully patched - Bulletproof UI, Safe Data, Trade Drain included
 ]]
 
--- 1. ROBUST UI LOADER (Fixes Line 1 nil value crash)
-local WindUI
-local function loadUI()
-    local urls = {
-        "https://cdn.jsdelivr.net/gh/Footagesus/WindUI@main/dist/main.lua",
-        "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua",
-        "https://raw.githubusercontent.com/silencedevs/SilenceScripts/refs/heads/main/libraries/windui/windui.luau"
-    }
-    for _, url in ipairs(urls) do
-        local success, result = pcall(function()
-            local src = game:HttpGet(url)
-            if src and #src > 100 then return loadstring(src) end
-        end)
-        if success and result then
-            local exec, mod = pcall(result)
-            if exec and mod then return mod end
+-- 1. Bulletproof UI Loader (Prevents Line 1 crash)
+local WindUI = nil
+local uiUrls = {
+    "https://raw.githubusercontent.com/silencedevs/SilenceScripts/refs/heads/main/libraries/windui/windui.luau",
+    "https://cdn.jsdelivr.net/gh/Footagesus/WindUI@main/dist/main.lua",
+    "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"
+}
+
+for _, url in ipairs(uiUrls) do
+    local success, result = pcall(function()
+        local src = game:HttpGet(url)
+        if src and #src > 100 then
+            return loadstring(src)()
         end
+    end)
+    if success and result then
+        WindUI = result
+        break
     end
-    return nil
 end
 
-WindUI = loadUI()
 if not WindUI then
-    game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Silence Error", Text = "Failed to load UI library. Please try a different executor."})
+    game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Silence Error", Text = "Failed to load UI library. Try again later."})
     return
 end
 
@@ -35,7 +34,11 @@ local services = {
     players = game:GetService("Players"),
     replicatedStorage = game:GetService("ReplicatedStorage"),
     workspace = game:GetService("Workspace"),
+    runService = game:GetService("RunService"),
+    virtualUser = game:GetService("VirtualUser"),
     userInputService = game:GetService("UserInputService"),
+    tweenService = game:GetService("TweenService"),
+    lighting = game:GetService("Lighting"),
     soundService = game:GetService("SoundService")
 }
 
@@ -71,7 +74,6 @@ local function getPets(data)
     for k, v in pairs(p) do if type(v) == "table" then valid[k] = v end end
     return valid
 end
-
 local function requireAny(paths, default)
     for _, path in ipairs(paths) do
         local success, res = pcall(function()
@@ -89,7 +91,7 @@ local emptyData = { Pets = { Owned = {} }, RebirthOptions = 0, Statistics = { Re
 local repProxy = setmetatable({}, { __index = function(_, key) local data = getReplicaData(); local timeout = (tick() - start) > 10; if key == "Loaded" then return data ~= nil or timeout end; if key == "Data" then return data or (timeout and emptyData or nil) end; if data then return data[key] end end })
 
 local player = {
-    player = services.players.LocalPlayer, name = services.players.LocalPlayer.Name,
+    player = services.players.LocalPlayer, name = services.players.LocalPlayer.Name, displayName = services.players.LocalPlayer.DisplayName,
     network = makeNetworkShim(), replication = repProxy,
     rebirths = requireAny({{"Shared", "Progression", "RebirthConfig"}, {"Game", "Rebirths"}}, { fromIndex = function() return 1 end, getPrice = function() return 1 end, ClicksPrice = function() return 1 end }),
     eggs = requireAny({{"Shared", "Pets", "LaunchEggConfig"}, {"Game", "Eggs"}}, {}),
@@ -129,7 +131,7 @@ function formatSuffix(val)
 end
 
 -- 5. Build UI FIRST (Guarantees tabs are never empty)
-local ui = { rebMap = {}, selectedRebirth = nil, selectedPotionVals = {}, selectedEgg = nil, hatchAmount = 3, selGold = {}, selRainbow = {}, selEnch = {}, selEnchPets = {}, enchMap = {}, delPets = {}, rarities = {}, rarityMap = {} }
+local ui = { rebMap = {}, selectedRebirth = nil, selectedPotionVals = {}, selectedEgg = nil, hatchAmount = 3, selGold = {}, selRainbow = {}, selEnch = {}, selEnchPets = {}, enchMap = {}, delPets = {}, rarities = {} }
 
 -- Main UI
 tabs.main:Section({ Title = "Clicking", TextSize = 22, Box = false, TextXAlignment = "Center" })
@@ -165,10 +167,8 @@ tabs.crafting:Toggle({ Title = "Auto Craft Rainbow", Value = false, Icon = "luci
 -- Teleport UI
 tabs.teleport:Section({ Title = "Main World", TextSize = 22, Box = false, TextXAlignment = "Center" })
 tabs.teleport:Button({ Title = "Teleport to Spawn", Callback = function() pcall(function() player.network:InvokeServer("TeleportWorld", "Main") end) end })
-ui.teleportMainFolder = Instance.new("Folder")
 tabs.teleport:Section({ Title = "Space World", TextSize = 22, Box = false, TextXAlignment = "Center" })
 tabs.teleport:Button({ Title = "Teleport to Space World", Callback = function() pcall(function() player.network:InvokeServer("TeleportWorld", "Space") end) end })
-ui.teleportSpaceFolder = Instance.new("Folder")
 tabs.teleport:Toggle({ Title = "Teleport on Join", Desc = "Requires Config Autoloading", Value = false, Icon = "lucide:map-pin", Callback = function(v) if v then task.spawn(function() task.wait(1); pcall(function() player.network:InvokeServer("TeleportWorld", "Main") end) end) end end })
 
 -- Enchanting UI
