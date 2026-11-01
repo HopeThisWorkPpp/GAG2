@@ -1,7 +1,7 @@
 --[[
     Silence - Tap Simulator
     by Henrik @xyzhenrik
-    Fully patched - UI built first, data loaded second
+    Fully patched - Unbreakable UI loading
 ]]
 
 local services = {
@@ -37,15 +37,13 @@ local function getReplicaData()
     return nil
 end
 
--- Bulletproof pet reader (prevents "attempt to index number with 'Tier'")
+-- Bulletproof pet reader
 local function getPets(data)
     if not data or not data.Pets then return {} end
     local p = data.Pets.Owned or data.Pets
     if type(p) ~= "table" then return {} end
     local valid = {}
-    for k, v in pairs(p) do
-        if type(v) == "table" then valid[k] = v end
-    end
+    for k, v in pairs(p) do if type(v) == "table" then valid[k] = v end end
     return valid
 end
 
@@ -70,7 +68,7 @@ local player = {
     network = makeNetworkShim(), replication = repProxy,
     rebirths = requireAny({{"Shared", "Progression", "RebirthConfig"}, {"Game", "Rebirths"}}, { fromIndex = function() return 1 end, getPrice = function() return 1 end, ClicksPrice = function() return 1 end }),
     eggs = requireAny({{"Shared", "Pets", "LaunchEggConfig"}, {"Game", "Eggs"}}, {}),
-    portals = requireAny({{"Shared", "Game", "IslandConfig"}, {"Game", "Portals"}}, {}),
+    portals = requireAny({{"Shared", "Progression", "IslandConfig"}, {"Shared", "Game", "IslandConfig"}, {"Shared", "Game", "Portals"}, {"Game", "Portals"}}, {}),
     enchantData = requireAny({{"Shared", "Pets", "EnchantConfig"}, {"Game", "EnchantData"}}, {Enchants = {}}),
     petStats = requireAny({{"Shared", "Pets", "PetPower"}, {"Game", "PetStats"}}, { GetPercentage = function() return 1 end, GetMulti = function() return 1 end }),
     petStatsRarities = requireAny({{"Shared", "Pets", "RarityTextGradient"}, {"Game", "PetStats", "Rarities"}}, {})
@@ -237,13 +235,21 @@ task.spawn(function()
         ui.enchPetsDropdown:Refresh(#plist > 0 and plist or {"None"})
     end)
     
-    -- Teleports
+    -- Teleports (Safely wrapped in pcall)
     pcall(function()
         local zones = {}
-        for n, d in pairs(player.portals) do if type(d) == "table" and d.Price and not ({Kryo=1,Magma=1,Celestial=1,Holographic=1,Lunar=1,Cyberpunk=1,Rainbow=1})[n] then table.insert(zones, {name=n, price=d.Price}) end end
+        for n, d in pairs(player.portals) do 
+            if type(d) == "table" and d.Price and not ({Kryo=1,Magma=1,Celestial=1,Holographic=1,Lunar=1,Cyberpunk=1,Rainbow=1})[n] then 
+                table.insert(zones, {name=n, price=d.Price}) 
+            end 
+        end
         table.sort(zones, function(a,b) return a.price < b.price end)
-        for _, z in ipairs(zones) do tabs.teleport:Button({ Title = "Teleport to " .. z.name, Callback = function() pcall(function() player.network:InvokeServer("TeleportZone", z.name) end) end }) end
-        for _, z in ipairs({{name="Kryo"},{name="Magma"},{name="Celestial"},{name="Holographic"},{name="Lunar"},{name="Cyberpunk"},{name="Rainbow"}}) do tabs.teleport:Button({ Title = "Teleport to " .. z.name, Callback = function() pcall(function() player.network:InvokeServer("TeleportZone", z.name) end) end }) end
+        for _, z in ipairs(zones) do 
+            tabs.teleport:Button({ Title = "Teleport to " .. z.name, Callback = function() pcall(function() player.network:InvokeServer("TeleportZone", z.name) end) end }) 
+        end
+        for _, z in ipairs({{name="Kryo"},{name="Magma"},{name="Celestial"},{name="Holographic"},{name="Lunar"},{name="Cyberpunk"},{name="Rainbow"}}) do 
+            tabs.teleport:Button({ Title = "Teleport to " .. z.name, Callback = function() pcall(function() player.network:InvokeServer("TeleportZone", z.name) end) end }) 
+        end
     end)
 end)
 
