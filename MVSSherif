@@ -238,7 +238,7 @@ local silence = WindUI:CreateWindow({
         Draggable = true,
         OnlyMobile = false,
         Scale = (services.userInputService.KeyboardEnabled and services.userInputService.MouseEnabled) and 1.25 or 0.5,
-
+        
         Color = ColorSequence.new(
             Color3.fromHex("#880000"),
             Color3.fromHex("000000")
@@ -477,11 +477,11 @@ end
 function checkDistanceToEgg(eggName)
     tabs.hatching.eggPos = getEggPosition(eggName)
     if not tabs.hatching.eggPos then return false end
-
+    
     if player.player.Character and player.player.Character:FindFirstChild("HumanoidRootPart") then
         tabs.hatching.playerPos = player.player.Character.HumanoidRootPart.Position
         tabs.hatching.distance = (tabs.hatching.playerPos - tabs.hatching.eggPos).Magnitude
-
+        
         if tabs.hatching.distance > tabs.hatching.maxDistance then
             return false
         end
@@ -522,11 +522,11 @@ tabs.crafting.autoRainbowEnabled = false
 function getPetIdsForGoldenCraft(petName, amount)
     tabs.crafting.ids = {}
     repeat task.wait() until player.replication.Loaded and player.replication.Data
-
+    
     for petId, petData in pairs(player.replication.Data.Pets) do
-        if petData.Name == petName
-            and petData.Tier == "Normal"
-            and not petData.Locked
+        if petData.Name == petName 
+            and petData.Tier == "Normal" 
+            and not petData.Locked 
             and #tabs.crafting.ids < amount then
             table.insert(tabs.crafting.ids, petId)
         end
@@ -537,11 +537,11 @@ end
 function getGoldenPetIdsForRainbowCraft(petName, amount)
     tabs.crafting.ids = {}
     repeat task.wait() until player.replication.Loaded and player.replication.Data
-
+    
     for petId, petData in pairs(player.replication.Data.Pets) do
-        if petData.Name == petName
-            and petData.Tier == "Golden"
-            and not petData.Locked
+        if petData.Name == petName 
+            and petData.Tier == "Golden" 
+            and not petData.Locked 
             and #tabs.crafting.ids < amount then
             table.insert(tabs.crafting.ids, petId)
         end
@@ -551,34 +551,34 @@ end
 
 function getNormalPetNames()
     repeat task.wait() until player.replication.Loaded and player.replication.Data
-
+    
     tabs.crafting.petNames = {}
     tabs.crafting.nameSet = {}
-
+    
     for petId, petData in pairs(player.replication.Data.Pets) do
         if petData.Tier == "Normal" and not tabs.crafting.nameSet[petData.Name] then
             table.insert(tabs.crafting.petNames, petData.Name)
             tabs.crafting.nameSet[petData.Name] = true
         end
     end
-
+    
     table.sort(tabs.crafting.petNames)
     return tabs.crafting.petNames
 end
 
 function getGoldenPetNames()
     repeat task.wait() until player.replication.Loaded and player.replication.Data
-
+    
     tabs.crafting.petNames = {}
     tabs.crafting.nameSet = {}
-
+    
     for petId, petData in pairs(player.replication.Data.Pets) do
         if petData.Tier == "Golden" and not tabs.crafting.nameSet[petData.Name] then
             table.insert(tabs.crafting.petNames, petData.Name)
             tabs.crafting.nameSet[petData.Name] = true
         end
     end
-
+    
     table.sort(tabs.crafting.petNames)
     return tabs.crafting.petNames
 end
@@ -586,7 +586,7 @@ end
 function getCurrentlyRainbowCrafting()
     tabs.crafting.crafting = {}
     repeat task.wait() until player.replication.Loaded and player.replication.Data
-
+    
     if player.replication.Data.CraftingPets and player.replication.Data.CraftingPets.Rainbow then
         for petId, craftData in pairs(player.replication.Data.CraftingPets.Rainbow) do
             tabs.crafting.timeLeft = math.max(0, craftData.EndTime - os.time())
@@ -598,9 +598,12 @@ function getCurrentlyRainbowCrafting()
             })
         end
     end
-
+    
     return tabs.crafting.crafting
 end
+
+
+
 
 function teleportToGoldenMachine()
     tabs.crafting.character = player.player.Character
@@ -624,15 +627,15 @@ end
 
 function processGoldenCraft(petName, petsNeeded)
     tabs.crafting.petIds = getPetIdsForGoldenCraft(petName, petsNeeded)
-
+    
     if #tabs.crafting.petIds < petsNeeded then
         return false
     end
-
+    
     tabs.crafting.success = pcall(function()
         player.network:InvokeServer("CraftPets", tabs.crafting.petIds)
     end)
-
+    
     return tabs.crafting.success
 end
 
@@ -640,7 +643,7 @@ function processRainbowCraft(petName, petsNeeded)
     tabs.crafting.currentCrafting = getCurrentlyRainbowCrafting()
     tabs.crafting.usedSlots = #tabs.crafting.currentCrafting
     tabs.crafting.availableSlots = 3 - tabs.crafting.usedSlots
-
+    
     for _, craft in ipairs(tabs.crafting.currentCrafting) do
         if craft.claimable then
             pcall(function()
@@ -649,22 +652,23 @@ function processRainbowCraft(petName, petsNeeded)
             task.wait(0.1)
         end
     end
-
+    
     tabs.crafting.currentCrafting = getCurrentlyRainbowCrafting()
     tabs.crafting.availableSlots = 3 - #tabs.crafting.currentCrafting
-
+    
     if tabs.crafting.availableSlots <= 0 then return false end
-
+    
     tabs.crafting.petIds = getGoldenPetIdsForRainbowCraft(petName, petsNeeded)
     if #tabs.crafting.petIds < petsNeeded then return false end
-
+    
     tabs.crafting.success = pcall(function()
         player.network:InvokeServer("StartRainbow", tabs.crafting.petIds)
     end)
-
+    
     if tabs.crafting.success then task.wait(0.1) end
     return tabs.crafting.success
 end
+
 
 function buildCraftQueue()
     tabs.crafting.goldenQueue = {}
@@ -672,7 +676,7 @@ function buildCraftQueue()
 
     if tabs.crafting.autoGoldenEnabled and tabs.crafting.selectedGoldenPets then
         tabs.crafting.petsNeeded = 6
-
+        
         if tabs.crafting.selectedGoldenChance then
             if tabs.crafting.selectedGoldenChance:match("5%%") then
                 tabs.crafting.petsNeeded = 1
@@ -688,7 +692,7 @@ function buildCraftQueue()
                 tabs.crafting.petsNeeded = 6
             end
         end
-
+        
         for petName, isSelected in pairs(tabs.crafting.selectedGoldenPets) do
             if isSelected then
                 table.insert(tabs.crafting.goldenQueue, {
@@ -699,10 +703,11 @@ function buildCraftQueue()
             end
         end
     end
+    
 
     if tabs.crafting.autoRainbowEnabled and tabs.crafting.selectedRainbowPets then
         tabs.crafting.petsNeeded = 1
-
+        
         if tabs.crafting.selectedRainbowTime then
             if tabs.crafting.selectedRainbowTime:match("1 Pet") then
                 tabs.crafting.petsNeeded = 1
@@ -716,7 +721,7 @@ function buildCraftQueue()
                 tabs.crafting.petsNeeded = 5
             end
         end
-
+        
         for petName, isSelected in pairs(tabs.crafting.selectedRainbowPets) do
             if isSelected then
                 table.insert(tabs.crafting.rainbowQueue, {
@@ -727,24 +732,27 @@ function buildCraftQueue()
             end
         end
     end
-
+    
     return tabs.crafting.goldenQueue, tabs.crafting.rainbowQueue
 end
+
 
 function processCraftQueue()
     if tabs.crafting.craftingstate.processing then
         return false
     end
-
+    
     tabs.crafting.craftingstate.processing = true
     tabs.crafting.goldenQueue, tabs.crafting.rainbowQueue = buildCraftQueue()
     tabs.crafting.craftedAny = false
+    
 
     if tabs.crafting.autoGoldenEnabled and #tabs.crafting.goldenQueue > 0 then
         teleportToGoldenMachine()
-
+        
         for _, craftJob in ipairs(tabs.crafting.goldenQueue) do
             if not tabs.crafting.autoGoldenEnabled then break end
+            
 
             while tabs.crafting.autoGoldenEnabled do
                 tabs.crafting.success = processGoldenCraft(craftJob.petName, craftJob.petsNeeded)
@@ -753,50 +761,53 @@ function processCraftQueue()
                 task.wait(0.05)
             end
         end
+        
 
         if tabs.crafting.craftedAny then
             refreshCraftingDropdowns()
         end
     end
+    
 
     if tabs.crafting.autoRainbowEnabled and #tabs.crafting.rainbowQueue > 0 then
         teleportToRainbowMachine()
-
+        
         for _, craftJob in ipairs(tabs.crafting.rainbowQueue) do
             if not tabs.crafting.autoRainbowEnabled then break end
-
+            
             tabs.crafting.success = processRainbowCraft(craftJob.petName, craftJob.petsNeeded)
             if tabs.crafting.success then
                 tabs.crafting.craftedAny = true
                 task.wait(0.05)
             end
         end
-
+        
         if tabs.crafting.craftedAny then
             refreshCraftingDropdowns()
         end
     end
-
+    
     tabs.crafting.craftingstate.processing = false
     return tabs.crafting.craftedAny
 end
 
+
 function refreshCraftingDropdowns()
     tabs.crafting.currentTime = os.clock()
-
+    
     if tabs.crafting.currentTime - tabs.crafting.craftingstate.lastRefresh < 5 then
         return
     end
-
+    
     tabs.crafting.craftingstate.lastRefresh = tabs.crafting.currentTime
-
+    
     task.spawn(function()
         if tabs.crafting.goldenPetsDropdown then
             pcall(function()
                 tabs.crafting.goldenPetsDropdown:Refresh(getNormalPetNames())
             end)
         end
-
+        
         if tabs.crafting.rainbowPetsDropdown then
             pcall(function()
                 tabs.crafting.rainbowPetsDropdown:Refresh(getGoldenPetNames())
@@ -809,24 +820,25 @@ function startCraftingLoop()
     if tabs.crafting.craftingstate.isActive then
         return
     end
-
+    
     tabs.crafting.craftingstate.isActive = true
-
+    
     tabs.crafting.character = player.player.Character
     if tabs.crafting.character and tabs.crafting.character:FindFirstChild("HumanoidRootPart") then
         tabs.crafting.craftingstate.savedPosition = tabs.crafting.character:GetPivot()
     end
-
+    
     task.spawn(function()
         while tabs.crafting.craftingstate.isActive and (tabs.crafting.autoGoldenEnabled or tabs.crafting.autoRainbowEnabled) do
             tabs.crafting.craftedAny = processCraftQueue()
-
+            
             if tabs.crafting.craftedAny then
                 task.wait(0.25)
             else
                 task.wait(5)
             end
         end
+        
 
         if tabs.crafting.craftingstate.savedPosition then
             tabs.crafting.character = player.player.Character
@@ -837,7 +849,7 @@ function startCraftingLoop()
             end
             tabs.crafting.craftingstate.savedPosition = nil
         end
-
+        
         tabs.crafting.craftingstate.isActive = false
     end)
 end
@@ -880,10 +892,10 @@ refreshGoldenPets()
 
 function updateGoldenStatus()
     if not tabs.crafting.goldenStatusLabel then return end
-
+    
     tabs.crafting.statusText = "Selected Pets:\n"
     tabs.crafting.hasSelected = false
-
+    
     for petName, isSelected in pairs(tabs.crafting.selectedGoldenPets) do
         if isSelected then
             tabs.crafting.hasSelected = true
@@ -896,20 +908,20 @@ function updateGoldenStatus()
             tabs.crafting.statusText = tabs.crafting.statusText .. string.format("%s: %d owned\n", petName, tabs.crafting.count)
         end
     end
-
+    
     if not tabs.crafting.hasSelected then
         tabs.crafting.statusText = "No pets selected"
     end
-
+    
     tabs.crafting.goldenStatusLabel:SetDesc(tabs.crafting.statusText)
 end
 
 function updateRainbowStatus()
     if not tabs.crafting.rainbowStatusLabel then return end
-
+    
     tabs.crafting.statusText = "Selected Pets:\n"
     tabs.crafting.hasSelected = false
-
+    
     for petName, isSelected in pairs(tabs.crafting.selectedRainbowPets) do
         if isSelected then
             tabs.crafting.hasSelected = true
@@ -922,26 +934,27 @@ function updateRainbowStatus()
             tabs.crafting.statusText = tabs.crafting.statusText .. string.format("%s: %d owned\n", petName, tabs.crafting.count)
         end
     end
-
+    
     if not tabs.crafting.hasSelected then
         tabs.crafting.statusText = "No pets selected\n"
     end
 
     tabs.crafting.currentCrafting = getCurrentlyRainbowCrafting()
-
+    
     if #tabs.crafting.currentCrafting > 0 then
         tabs.crafting.statusText = tabs.crafting.statusText .. "\nCurrently Crafting:\n"
+        
 
         tabs.crafting.uniqueCrafts = {}
         for _, craft in ipairs(tabs.crafting.currentCrafting) do
             tabs.crafting.uniqueCrafts[craft.id] = craft
         end
-
+        
         for craftId, craft in pairs(tabs.crafting.uniqueCrafts) do
             tabs.crafting.hours = math.floor(craft.timeLeft / 3600)
             tabs.crafting.mins = math.floor((craft.timeLeft % 3600) / 60)
             tabs.crafting.secs = craft.timeLeft % 60
-
+            
             if tabs.crafting.hours > 0 then
                 tabs.crafting.timeStr = string.format("%dh %dm %ds", tabs.crafting.hours, tabs.crafting.mins, tabs.crafting.secs)
             elseif tabs.crafting.mins > 0 then
@@ -949,11 +962,11 @@ function updateRainbowStatus()
             else
                 tabs.crafting.timeStr = string.format("%ds", tabs.crafting.secs)
             end
-
+            
             tabs.crafting.statusText = tabs.crafting.statusText .. string.format("%s: %s\n", craft.name, tabs.crafting.timeStr)
         end
     end
-
+    
     tabs.crafting.rainbowStatusLabel:SetDesc(tabs.crafting.statusText)
 end
 
@@ -1049,6 +1062,7 @@ tabs.crafting.rainbowStatusLabel = tabs.crafting:Paragraph({
     Desc = "No pets selected",
 })
 
+
 tabs.crafting:Toggle({
     Title = "Auto Craft Rainbow",
     Value = false,
@@ -1082,6 +1096,7 @@ task.spawn(function()
         end
     end
 end)
+
 
 --[[
     Teleporting stuff
@@ -1148,6 +1163,7 @@ for _, zone in ipairs(tabs.teleport.mainZones) do
     })
 end
 
+
 tabs.teleport:Section({
     Title = "Space World",
     TextSize = 22,
@@ -1174,6 +1190,7 @@ for _, zone in ipairs(tabs.teleport.spaceZones) do
         end
     })
 end
+
 
 tabs.teleport.selectedZone = "Spawn (Main World)"
 tabs.teleport.teleportOnJoinEnabled = false
@@ -1411,87 +1428,6 @@ end
 
 tabs.enchanting.initialPetList = getFormattedEnchantPetList()
 
-tabs.enchanting:Space({Colums = 2})
-tabs.enchanting:Section({
-    Title = "Auto Enchanting",
-    TextSize = 22,
-    TextXAlignment = "Center",
-    Box = false,
-})
-tabs.enchanting:Dropdown({
-    Title = "Select Desired Enchant(s)",
-    Values = getEnchantNames(),
-    Value = {},
-    Multi = true,
-    SearchBarEnabled = true,
-    Callback = function(value)
-        tabs.enchanting.selectedEnchants = {}
-        if type(value) == "table" then
-            for _, enchantName in pairs(value) do
-                if type(enchantName) == "string" then
-                    tabs.enchanting.selectedEnchants[enchantName] = true
-                end
-            end
-        end
-    end,
-})
-tabs.enchanting.petDropdown = tabs.enchanting:Dropdown({
-    Title = "Select Pet(s) to Enchant",
-    Values = tabs.enchanting.initialPetList,
-    Value = {},
-    Multi = true,
-    SearchBarEnabled = true,
-    Callback = function(value)
-        tabs.enchanting.selectedPets = {}
-        if type(value) == "table" then
-            for _, petStr in pairs(value) do
-                if type(petStr) == "string" then
-                    tabs.enchanting.selectedPets[petStr] = true
-                end
-            end
-        end
-        pcall(updateEnchantStatus)
-    end,
-})
-tabs.enchanting:Button({
-    Title = "Refresh Pet List",
-    Icon = "lucide:refresh-cw",
-    Callback = function()
-        if tabs.enchanting.autoEnchantEnabled then
-            tabs.enchanting.statusLabel:SetDesc("Stop Auto Enchant before refreshing!")
-            return
-        end
-        refreshEnchantPetDropdown()
-        pcall(updateEnchantStatus)
-    end,
-})
-tabs.enchanting.statusLabel = tabs.enchanting:Paragraph({
-    Title = "Status",
-    Desc = "Loading...",
-})
-tabs.enchanting:Toggle({
-    Title = "Auto Enchant",
-    Value = false,
-    Icon = "lucide:sparkles",
-    Callback = function(value)
-        tabs.enchanting.autoEnchantEnabled = value
-        if value then
-            if not next(tabs.enchanting.selectedPets) or not next(tabs.enchanting.selectedEnchants) then
-                tabs.enchanting.autoEnchantEnabled = false
-                tabs.enchanting.statusLabel:SetDesc("Select at least one pet and one enchant first!")
-                return
-            end
-            startEnchantLoop()
-        else
-            stopEnchantLoop()
-        end
-    end,
-})
-
-task.spawn(function()
-    repeat task.wait() until player.replication.Loaded and player.replication.Data
-    pcall(updateEnchantStatus)
-end)
 
 --[[
     MISC
@@ -1659,7 +1595,7 @@ tabs.misc:Toggle({
 })
 
 --[[
-    WEBHOOK TAB (patched: listens on EggHatchResult instead of wrapping OpenEgg)
+    WEBHOOK TAB
 ]]
 
 tabs.webhook.url = ""
@@ -2080,19 +2016,19 @@ local elements = {
             Icon = "lucide:award",
             Callback = function(value)
                     tabs.main.claimRewards = value
-
+                    
                     if tabs.main.autoClaiming then
                         task.cancel(tabs.main.autoClaiming)
                         tabs.main.autoClaiming = nil
                     end
-
+                    
                     if value then
                         tabs.main.autoClaiming = task.spawn(function()
                             while tabs.main.claimRewards do
                                 pcall(function()
                                     player.network:InvokeServer("ClaimRankReward")
                                 end)
-
+                                
                                 task.wait(60)
                             end
                         end)
@@ -2167,19 +2103,19 @@ local elements = {
                         task.wait(0.2)
                         tpToEgg(tabs.hatching.selectedEgg)
                         task.wait(0.2)
-
+                        
                         while tabs.hatching.autoHatch do
                             if tabs.crafting.craftingstate.processing then
                                 task.wait(0.5)
                                 continue
                             end
-
+                            
                             if tabs.hatching.selectedEgg then
                                 if not checkDistanceToEgg(tabs.hatching.selectedEgg) then
                                     tpToEgg(tabs.hatching.selectedEgg)
                                     task.wait(0.5)
                                 end
-
+                                
                                 pcall(function()
                                     player.network:InvokeServer("OpenEgg", tabs.hatching.selectedEgg, tabs.hatching.selectedHatchAmount)
                                 end)
