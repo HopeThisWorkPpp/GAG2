@@ -1,32 +1,44 @@
 --[[
     Silence - Tap Simulator
     by Henrik @xyzhenrik
-    Fully patched - Multi-Fallback UI, Trade Drain added, Pets.Owned fixed
+    Fully patched - Bypass HTTP crash, UI built directly, Trade Drain added
 ]]
 
--- 1. ROBUST UI LOADER (Prevents Line 1 nil value crash)
-local WindUI = nil
-local uiUrls = {
-    "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua",
+-- 1. BYPASS HTTP LIMITATION (Fixes Line 1 crash)
+local function fetch(url)
+    local req = (syn and syn.request) or (http and http.request) or http_request or request
+    if req then
+        local success, res = pcall(function() return req({Url = url, Method = "GET"}) end)
+        if success and res and res.Body then return res.Body end
+    end
+    if httpget then return httpget(url) end
+    if game.HttpGet then 
+        local s, r = pcall(function() return game:HttpGet(url) end)
+        if s then return r end
+    end
+    return nil
+end
+
+local WindUI
+local urls = {
     "https://cdn.jsdelivr.net/gh/Footagesus/WindUI@main/dist/main.lua",
+    "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua",
     "https://raw.githubusercontent.com/silencedevs/SilenceScripts/refs/heads/main/libraries/windui/windui.luau"
 }
 
-for _, url in ipairs(uiUrls) do
-    local success, result = pcall(function()
-        local src = game:HttpGet(url)
-        if src and #src > 100 then
-            return loadstring(src)()
+for _, url in ipairs(urls) do
+    local src = fetch(url)
+    if src and #src > 100 then
+        local ok, res = pcall(function() return loadstring(src)() end)
+        if ok and res then
+            WindUI = res
+            break
         end
-    end)
-    if success and result then
-        WindUI = result
-        break
     end
 end
 
 if not WindUI then
-    game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Silence Error", Text = "Failed to load UI library. Please try again."})
+    warn("[Silence] Failed to load WindUI. Your executor is blocking HTTP requests.")
     return
 end
 
@@ -42,7 +54,7 @@ local services = {
     soundService = game:GetService("SoundService")
 }
 
--- 2. Safe RemoteServices Shim (Replaces missing Network module)
+-- 2. Safe RemoteServices Shim
 local RemoteServices = services.replicatedStorage:WaitForChild("RemoteServices")
 local function rem(svc, kind, name)
     local s = RemoteServices:FindFirstChild(svc); if not s then return nil end
